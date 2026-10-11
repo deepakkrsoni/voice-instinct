@@ -22,8 +22,12 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
+from backend import ClaudeCodeBackend
+from config import load
+from delegate import make_tools
 from pipecat.services.google.llm import GoogleLLMService
 from pipecat.services.kokoro.tts import KokoroTTSService
+from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transports.base_transport import TransportParams
 from pipecat.utils.time import time_now_iso8601
@@ -32,13 +36,24 @@ load_dotenv()
 
 PARAKEET_DIR = Path.home() / ".local/share/parakeet-dictation/models/desktop"
 KOKORO_DIR = Path.home() / "kokoro"
-GEMINI_MODEL = "gemini-3.8-flash"  # newest Flash on the live models list, 2026-10-11
 
 SYSTEM_PROMPT = (
     "You are a voice assistant. Your replies are spoken aloud, so use short, "
     "plain sentences with no markdown, lists, or emoji. Keep answers to one to "
-    "three sentences unless asked for more."
+    "three sentences unless asked for more. For anything that needs files, the "
+    "shell, the web, or code, call delegate(task) and say one short line like "
+    "'on it' first. When a result says needs_confirmation, tell the user what it "
+    "wants to do and ask yes or no, then call confirm_pending after they answer. "
+    "Never claim a task is done unless a tool result says done."
 )
+
+
+def build_llm(cfg):
+    key = os.environ.get(cfg.api_key_env, "ollama")
+    if cfg.provider == "gemini":
+        return GoogleLLMService(api_key=key, model=cfg.model)
+    base = cfg.base_url or ("http://localhost:11434/v1" if cfg.provider == "ollama" else None)
+    return OpenAILLMService(api_key=key, model=cfg.model, base_url=base)
 
 
 class ParakeetSTTService(SegmentedSTTService):
@@ -87,14 +102,23 @@ async def bot(runner_args: RunnerArguments):
     transport = await create_transport(runner_args, transport_params)
 
     stt = ParakeetSTTService()
-    llm = GoogleLLMService(api_key=os.environ["GEMINI_API_KEY"], model=GEMINI_MODEL)
+    cfg = load()
+    backend = ClaudeCodeBackend(cwd=cfg.backend_cwd, timeout=cfg.backend_timeout)
+    llm = build_llm(cfg)
+    tools = []
+    if backend.available():
+        tools = make_tools(backend)
+        for t in tools:
+            llm.register_direct_function(t)
+    else:
+        logger.warning("claude CLI not found; running front-model-only")
     tts = KokoroTTSService(
         model_path=str(KOKORO_DIR / "kokoro-v1.0.onnx"),
         voices_path=str(KOKORO_DIR / "voices-v1.0.bin"),
         settings=KokoroTTSService.Settings(voice="af_heart"),
     )
 
-    context = LLMContext([{"role": "system", "content": SYSTEM_PROMPT}])
+    context = LLMContext([{"role": "system", "content": SYSTEM_PROMPT}], tools=tools)
     user_agg, assistant_agg = LLMContextAggregatorPair(
         context,
         # Default turn stop strategy is Smart Turn v3 (local).

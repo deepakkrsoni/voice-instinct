@@ -1,0 +1,5 @@
+# Front model (the voice you talk to). The backend agent is the Claude Code CLI you are logged into.
+provider = "gemini"        # gemini | openai | ollama
+model = "gemini-3.8-flash"
+api_key_env = "GEMINI_API_KEY"
+# base_url = "http://localhost:11434/v1"   # for ollama / openai-compatible
