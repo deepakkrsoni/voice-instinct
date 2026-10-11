@@ -23,7 +23,10 @@ files you can read, edit, and delete.
    as silent (no-sound) messages instead.
 5. A scheduled job that wants a side effect (write, shell) never runs it: it becomes a pending
    approval delivered to you, resolved by your next spoken yes/no (the existing confirmation rule).
-6. The daily-review job is silent when it has nothing valuable to say.
+6. The heartbeat (every 30 minutes by default, off until enabled) reads `heartbeat.md` and says
+   nothing unless something needs your attention. Ten quiet beats in a row produce zero messages.
+7. "What's running?" answers from state: the current background task, how long it has run, and any
+   pending approvals.
 
 ## Non-goals
 
@@ -71,8 +74,14 @@ logged so the user can audit it. `wipe()` deletes the directory's contents.
 
 **Jobs (`jobs.py`).** `jobs.json` is a list of `{id, prompt, once_at | daily_at, last_run}`. Pure
 functions: `due(jobs, now)` and `mark_run(job, now)`. Times are local, 24h. No cron syntax.
-Tools: `schedule(when, what)`, `list_jobs()`, `cancel_job(id)`. A built-in `daily_review` job
-exists but is disabled by default and must be switched on by the user.
+Tools: `schedule(when, what)`, `list_jobs()`, `cancel_job(id)`. The heartbeat (below) is a separate
+built-in loop, not a job.
+
+**Heartbeat (`heartbeat.py`).** Modeled on OpenClaw's: every N minutes (default 30, off by
+default), wake the agent with `heartbeat.md` (a user-editable list of standing things to watch
+for, e.g. "tell me if my downloads folder passes 20 GB"), the profile, and the log tail. The reply
+is one or two spoken sentences, or `SILENT`, which is dropped before delivery. The heartbeat runs
+through the same Wake, Policy, and Notifier path as any job, so quiet hours and the daily cap apply.
 
 **Scheduler (`scheduler.py`).** One asyncio loop in the bot process, ticking every 30 s, calling a
 `wake(job)` for each due job and recording `last_run` before running (a crash must not cause a repeat
@@ -98,6 +107,10 @@ local speech (Kokoro to speakers via `paplay`); Telegram (`sendMessage` over HTT
 conversation, or input activity within the last 10 minutes. Default implementation reads the
 login session lock state; swappable.
 
+**Status (`whats_running` tool).** Reports the current background task and its elapsed time, any
+pending approvals, and the next scheduled job. Answers a voice question without starting work, so
+the single-thread "which task is which" confusion reviewers reported for Instinct does not arise.
+
 **Inbox (`inbox.json`).** Pending approvals created by wakes: `{id, task, denials, created}`.
 At session start, the assistant mentions unresolved items. Resolution reuses the existing
 confirmation flow: only an explicit spoken yes after the question, deciding the exact command.
@@ -108,6 +121,11 @@ Entries expire after 24 h.
 - Tier 0, autonomous: reading, researching read-only, notifying, speaking outside quiet hours,
   writing and deleting its own memory.
 - Tier 1, ask first: anything with side effects. Unchanged confirmation rules apply.
+- Adjustable autonomy: Instinct's "magic" comes from not asking for every step. `config.toml`
+  gets an `[autonomy]` table that maps a category (`file_edits`, `shell`) to `ask` (default) or
+  `auto`; `auto` adds that tool to the backend allowlist for wakes and delegated tasks. Tier 1
+  stays the default for everything. Spending and sending can never be set to `auto`; they have
+  no tools yet. Each `auto` category is announced aloud once at session start so it is not forgotten.
 - Never proactive: sending messages or email, spending money. These have no tools yet; adding one
   needs its own spec.
 - Memory only contains what the user said to remember or short session summaries, never raw
@@ -132,8 +150,9 @@ nothing executes. Manual: success criteria 1 to 6 by voice.
 
 1. **Memory:** MemoryStore, the three tools, prompt injection, wipe command. Criteria 1 and 3.
 2. **Reminders:** Jobs, Scheduler, Wake, Policy, Presence, Notifier (voice and Telegram outbound),
-   the three schedule tools. Criteria 2 and 4.
-3. **Proactive review and inbox:** `daily_review`, Inbox, session-start mention. Criteria 5 and 6.
+   the three schedule tools, `whats_running`. Criteria 2, 4 and 7.
+3. **Heartbeat, inbox, autonomy:** Heartbeat, Inbox, session-start mention, the `[autonomy]`
+   setting. Criteria 5 and 6.
 4. **Inbound Telegram (later):** poll `getUpdates`, so you can text or send voice notes to the
    agent, and answer pending approvals by replying yes/no while away. Voice notes go through
    Parakeet. This also turns it into the Instinct-style "text it anywhere" agent.
