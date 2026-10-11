@@ -16,27 +16,33 @@ files you can read, edit, and delete.
 
 1. "Remember that I'm vegetarian" in one session; in a new session "what do you remember about
    me?" lists it.
-2. "Remind me at 3pm to call my mom" produces exactly one spoken or notified reminder at 3pm,
-   with or without a browser page open.
+2. "Remind me at 3pm to call my mom" produces exactly one reminder at 3pm: spoken aloud by the
+   laptop if you are present, otherwise a Telegram message. It works with no browser page open.
 3. "Forget that" removes the fact from disk; one command wipes all memory and jobs.
-4. During quiet hours (default 22:00 to 08:00) nothing is spoken aloud; reminders become
-   silent notifications.
+4. During quiet hours (default 22:00 to 08:00) nothing is spoken aloud; reminders go to Telegram
+   as silent (no-sound) messages instead.
 5. A scheduled job that wants a side effect (write, shell) never runs it: it becomes a pending
    approval delivered to you, resolved by your next spoken yes/no (the existing confirmation rule).
 6. The daily-review job is silent when it has nothing valuable to say.
 
 ## Non-goals
 
-Calendar/email/payment/phone integrations, phone push, multi-user, cloud hosting, cron
-expressions, parallel background tasks, learning new skills automatically (Hermes-style).
+Calendar/email/payment/phone-call integrations, WhatsApp (see Decisions), multi-user, cloud
+hosting, cron expressions, parallel background tasks, learning new skills automatically
+(Hermes-style).
 
 ## Decisions (assumptions to overrule)
 
 - **Storage:** plain files in `~/.voice-instinct/`, no database. Open-source friendly, user-editable.
 - **Wake brain:** scheduled wakes use the existing Claude Code backend adapter, read-only, so
   there is no second LLM client. No CLI means proactive features are off, not broken.
-- **Delivery:** local-first. Speak through the machine's speakers with the local Kokoro, or send a
-  desktop notification (`notify-send`). Live session: inject into the open conversation instead.
+- **Delivery, two channels:** (1) *Voice:* the laptop speaks aloud with the local Kokoro when you
+  are present, or inside the live conversation if one is open. (2) *Text:* a Telegram bot messages
+  you when you are away, locked out, or in quiet hours. Telegram is chosen now because its Bot API
+  is official, free, and needs only a token and your chat id.
+- **WhatsApp later, not now:** the official WhatsApp Cloud API needs a business account and
+  template rules; browser automation of a personal account risks a ban under WhatsApp's terms.
+  The Notifier interface keeps it a drop-in adapter if you want it later.
 - **Build order:** three independently shippable phases, one plan each (below).
 
 ## Architecture
@@ -76,14 +82,21 @@ firing). One wake at a time, using the same single-slot rule as `delegate`.
 instruction: reply with one or two spoken sentences, or the single word `SILENT` if there is
 nothing worth saying. Runs the backend read-only. Denials become inbox entries, never executions.
 
-**Policy (`policy.py`).** Pure function `decide(now, history, quiet_hours, daily_cap) ->
-speak | notify | drop`. Quiet hours turn speaking into a silent notification. A daily cap
+**Policy (`policy.py`).** Pure function `decide(now, present, history, quiet_hours, daily_cap) ->
+speak | text | drop`. `present` says whether you are at the laptop. Not present, or quiet hours,
+turns speaking into a Telegram text (silent during quiet hours). A daily cap
 (default 5 unprompted interruptions) turns further non-reminder wakes into drops. Explicit
 reminders the user asked for are exempt from the cap but not from quiet hours' no-speech rule.
 
 **Notifier (`notify.py`).** Interface `deliver(text, mode)`. Implementations: live session
 (append a message to the active Pipecat context and run the LLM so it says it naturally);
-local speech (Kokoro to speakers via `paplay`); desktop notification via `notify-send`.
+local speech (Kokoro to speakers via `paplay`); Telegram (`sendMessage` over HTTPS, outbound only,
+`disable_notification` set during quiet hours). Token and chat id live in `.env`, never in
+`~/.voice-instinct/`.
+
+**Presence (`presence.py`).** Answers "are they at the laptop": session unlocked and an open
+conversation, or input activity within the last 10 minutes. Default implementation reads the
+login session lock state; swappable.
 
 **Inbox (`inbox.json`).** Pending approvals created by wakes: `{id, task, denials, created}`.
 At session start, the assistant mentions unresolved items. Resolution reuses the existing
@@ -118,12 +131,19 @@ nothing executes. Manual: success criteria 1 to 6 by voice.
 ## Phases (one plan each)
 
 1. **Memory:** MemoryStore, the three tools, prompt injection, wipe command. Criteria 1 and 3.
-2. **Reminders:** Jobs, Scheduler, Wake, Policy, Notifier, the three schedule tools. Criteria 2 and 4.
+2. **Reminders:** Jobs, Scheduler, Wake, Policy, Presence, Notifier (voice and Telegram outbound),
+   the three schedule tools. Criteria 2 and 4.
 3. **Proactive review and inbox:** `daily_review`, Inbox, session-start mention. Criteria 5 and 6.
+4. **Inbound Telegram (later):** poll `getUpdates`, so you can text or send voice notes to the
+   agent, and answer pending approvals by replying yes/no while away. Voice notes go through
+   Parakeet. This also turns it into the Instinct-style "text it anywhere" agent.
 
 ## Open questions
 
-- Is there a notification daemon on this Sway setup for `notify-send`? Check before phase 2.
+- You must create the Telegram bot (BotFather) and supply its token and your chat id; I cannot
+  do that for you. Until phase 4, replies you send to the bot are ignored.
+- Best presence signal on this Sway setup (lock state vs idle time). Default: lock state plus an
+  open conversation; refine after trying it.
 - How the backend agent should read memory (inject text in the prompt, or grant it the directory).
   Default: inject text, keep the directory off its allowlist.
 - Whether speaking from a headless process works with the current audio setup (the PipeWire
