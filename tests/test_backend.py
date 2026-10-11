@@ -1,8 +1,10 @@
 import asyncio
 import json
+import os
+import time
 from pathlib import Path
 
-from backend import ClaudeCodeBackend, parse_stream
+from backend import READ_ONLY_TOOLS, ClaudeCodeBackend, parse_stream
 
 FAKE = str(Path(__file__).parent / "fake_claude.sh")
 
@@ -46,3 +48,67 @@ def test_run_timeout(tmp_path):
     slow.chmod(0o755)
     r = asyncio.run(ClaudeCodeBackend(cmd=str(slow), timeout=0.3).run("x"))
     assert r.is_error and "timed out" in r.text
+
+
+def _script(tmp_path, body):
+    f = tmp_path / "cli.sh"
+    f.write_text("#!/bin/sh\n" + body)
+    f.chmod(0o755)
+    return str(f)
+
+
+def _dead(pid):
+    for _ in range(30):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        time.sleep(0.1)
+    return False
+
+
+def test_task_starting_with_dashes_is_passed_as_text(tmp_path):
+    cli = _script(tmp_path, 'printf \'{"type":"result","result":"%s"}\\n\' "$*"\n')
+    r = asyncio.run(ClaudeCodeBackend(cmd=cli).run("--dangerously-skip-permissions"))
+    assert r.text.endswith("-- --dangerously-skip-permissions")
+
+
+def test_find_is_not_read_only():
+    assert not any(t.startswith("Bash(find") for t in READ_ONLY_TOOLS)
+
+
+def test_stdin_is_not_inherited(tmp_path):
+    cli = _script(tmp_path, 'printf \'{"type":"result","result":"%s"}\\n\' "$(readlink /proc/self/fd/0)"\n')
+    r_fd, w_fd = os.pipe()
+    saved = os.dup(0)
+    os.dup2(r_fd, 0)
+    try:
+        r = asyncio.run(ClaudeCodeBackend(cmd=cli).run("x"))
+    finally:
+        os.dup2(saved, 0)
+        os.close(saved), os.close(r_fd), os.close(w_fd)
+    assert r.text == "/dev/null"
+
+
+def test_cancel_kills_the_cli(tmp_path):
+    pidfile = tmp_path / "pid"
+    cli = _script(tmp_path, f"echo $$ > {pidfile}\nsleep 30\n")
+
+    async def go():
+        t = asyncio.create_task(ClaudeCodeBackend(cmd=cli).run("x"))
+        await asyncio.sleep(0.5)
+        t.cancel()
+        try:
+            await t
+        except asyncio.CancelledError:
+            pass
+
+    asyncio.run(go())
+    assert _dead(int(pidfile.read_text()))
+
+
+def test_cli_runs_as_own_process_group_leader(tmp_path):
+    # Needed so timeout/cancel can kill the whole tree (the CLI's own Bash children too).
+    cli = _script(tmp_path, 'printf \'{"type":"result","result":"%s %s"}\\n\' "$$" "$(awk \'{print $5}\' /proc/$$/stat)"\n')
+    pid, pgid = asyncio.run(ClaudeCodeBackend(cmd=cli).run("x")).text.split()
+    assert pid == pgid

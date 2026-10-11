@@ -109,7 +109,8 @@ async def bot(runner_args: RunnerArguments):
     if backend.available():
         tools = make_tools(backend)
         for t in tools:
-            llm.register_direct_function(t)
+            # Spec: barge-in cancels speech, not the task. (Default True would cancel the handler.)
+            llm.register_direct_function(t, cancel_on_interruption=False)
     else:
         logger.warning("claude CLI not found; running front-model-only")
     tts = KokoroTTSService(

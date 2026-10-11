@@ -16,13 +16,14 @@ class FakeBackend:
         return self.results.pop(0)
 
 
-def make_params(user_text=""):
+def make_params(*user_texts):
     out = []
 
     async def cb(r, **kw):
         out.append(r)
 
-    ctx = SimpleNamespace(get_messages=lambda: [{"role": "user", "content": user_text}])
+    msgs = [{"role": "user", "content": t} for t in user_texts]
+    ctx = SimpleNamespace(get_messages=lambda: msgs)
     return SimpleNamespace(result_callback=cb, context=ctx), out
 
 
@@ -60,21 +61,22 @@ def test_confirm_with_nothing_pending_runs_nothing():
 def test_confirm_yes_reruns_with_denied_tool_allowed():
     b = FakeBackend([BackendResult("blocked", "s1", [DENIAL]), BackendResult("created", "s1")])
     delegate, confirm = make_tools(b)
-    run(delegate(make_params()[0], "make a file"))
-    p, out = make_params("yeah go ahead")
+    run(delegate(make_params("make a file")[0], "make a file"))
+    p, out = make_params("make a file", "yeah go ahead")
     run(confirm(p))
     assert out[-1] == {"status": "done", "result": "created"}
-    assert b.calls[1][2] == ("Bash",)
+    assert b.calls[1][2] == ("Bash(touch /tmp/x)",)
+    assert "touch /tmp/x" in b.calls[1][0]  # retry names the exact approved command
 
 
 def test_confirm_no_cancels_and_clears_pending():
     b = FakeBackend([BackendResult("blocked", "s1", [DENIAL])])
     delegate, confirm = make_tools(b)
-    run(delegate(make_params()[0], "make a file"))
-    p, out = make_params("no don't")
+    run(delegate(make_params("make a file")[0], "make a file"))
+    p, out = make_params("make a file", "no don't")
     run(confirm(p))
     assert out[-1]["status"] == "cancelled"
-    p2, out2 = make_params("yes")  # stale yes after a no must not resurrect the task
+    p2, out2 = make_params("make a file", "no don't", "yes")  # stale yes after a no must not resurrect the task
     run(confirm(p2))
     assert out2[-1]["status"] == "nothing_pending" and len(b.calls) == 1
 
@@ -82,10 +84,32 @@ def test_confirm_no_cancels_and_clears_pending():
 def test_confirm_unclear_keeps_pending():
     b = FakeBackend([BackendResult("blocked", "s1", [DENIAL]), BackendResult("created", "s1")])
     delegate, confirm = make_tools(b)
-    run(delegate(make_params()[0], "make a file"))
-    p, out = make_params("hmm what would it do")
+    run(delegate(make_params("make a file")[0], "make a file"))
+    p, out = make_params("make a file", "hmm what would it do")
     run(confirm(p))
     assert out[-1]["status"] == "unclear"
-    p2, out2 = make_params("sure")
+    p2, out2 = make_params("make a file", "hmm what would it do", "sure")
     run(confirm(p2))
     assert out2[-1]["status"] == "done"
+
+
+def test_same_turn_confirm_cannot_approve():
+    # The "yes" in the request that started the task is not an answer to the question.
+    b = FakeBackend([BackendResult("blocked", "s1", [DENIAL]), BackendResult("created", "s1")])
+    delegate, confirm = make_tools(b)
+    run(delegate(make_params("okay make a file")[0], "make a file"))
+    p, out = make_params("okay make a file")  # user has not spoken since the question
+    run(confirm(p))
+    assert out[-1]["status"] == "unclear" and len(b.calls) == 1
+    p2, out2 = make_params("okay make a file", "yes please")  # a real answer still works
+    run(confirm(p2))
+    assert out2[-1]["status"] == "done"
+
+
+def test_denial_without_tool_name_does_not_crash():
+    b = FakeBackend([BackendResult("blocked", "s1", [{"tool_input": {}}]), BackendResult("ok", "s1")])
+    delegate, confirm = make_tools(b)
+    run(delegate(make_params("x")[0], "x"))
+    p, out = make_params("x", "yes")
+    run(confirm(p))
+    assert out[-1]["status"] in ("done", "error")

@@ -2,14 +2,17 @@
 
 import asyncio
 import json
+import os
 import shutil
+import signal
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 # ponytail: allowlist by command prefix; widen via spoken confirmation, not config.
+# No `find`: it can delete (-delete/-exec); Glob covers searching.
 READ_ONLY_TOOLS = [
     "Read", "Glob", "Grep",
-    "Bash(ls:*)", "Bash(du:*)", "Bash(find:*)", "Bash(stat:*)", "Bash(wc:*)", "Bash(cat:*)",
+    "Bash(ls:*)", "Bash(du:*)", "Bash(stat:*)", "Bash(wc:*)", "Bash(cat:*)",
 ]
 
 
@@ -51,17 +54,25 @@ class ClaudeCodeBackend:
         if not self.available():
             return BackendResult(text="The Claude CLI is not installed.", is_error=True)
         tools = ",".join([*READ_ONLY_TOOLS, *extra_allowed])
-        args = [self.cmd, "-p", task, "--output-format", "stream-json", "--verbose",
+        args = [self.cmd, "-p", "--output-format", "stream-json", "--verbose",
                 "--allowedTools", tools]
         if session_id:
             args += ["--resume", session_id]
+        args += ["--", task]  # "--": a task starting with dashes must stay text, never a flag
         proc = await asyncio.create_subprocess_exec(
-            *args, cwd=self.cwd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL
+            *args, cwd=self.cwd, stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+            start_new_session=True,  # own process group so we can kill its Bash children too
         )
         try:
             out, _ = await asyncio.wait_for(proc.communicate(), self.timeout)
         except asyncio.TimeoutError:
-            proc.kill()
-            await proc.wait()
             return BackendResult(text="The task timed out.", is_error=True)
+        finally:  # timeout or cancellation (barge-in): never leave the CLI running unattended
+            if proc.returncode is None:
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                await proc.wait()
         return parse_stream(out.decode(errors="replace").splitlines())

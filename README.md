@@ -39,7 +39,8 @@ Paths are hardcoded at the top of `bot.py` for now.
 The backend starts read-only (`Read/Glob/Grep` and a few `Bash(ls|du|find|stat|wc|cat)` commands).
 Anything else is blocked, the assistant tells you what it wants to do and asks yes/no, and only an
 explicit spoken "yes" (decided by code on your actual words, not by the LLM) re-runs it. Approving
-allows the whole blocked tool (e.g. `Bash`) for that one retry.
+allows only the exact blocked command for that one retry. A "yes" only counts if you spoke after the
+question was asked. `find` is not allowed read-only because it can delete.
 
 Using a subscription CLI this way depends on the vendor's terms; check them before relying on it.
 
