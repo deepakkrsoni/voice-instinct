@@ -9,3 +9,11 @@ dependencies = [
     "sherpa-onnx>=1.13.8",
     "sherpa-onnx-core>=1.13.8",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
