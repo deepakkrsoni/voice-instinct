@@ -1,6 +1,10 @@
 """LLM tools: hand real work to the backend agent, with code-enforced spoken confirmation."""
 
+from loguru import logger
+
+from backend import BackendResult
 from confirm import classify, last_user_text
+from pipecat.frames.frames import FunctionCallResultProperties
 
 
 def _describe(d: dict) -> str:
@@ -26,24 +30,47 @@ def _allow_rules(denials: list[dict]) -> list[str]:
 
 
 def make_tools(backend):
-    state = {"session": None, "pending": None}  # ponytail: one task at a time, single user
+    state = {"session": None, "pending": None, "running": False}  # ponytail: one task at a time, single user
+
+    async def _busy(params):
+        await params.result_callback({
+            "status": "busy",
+            "instruction": "Tell the user you are still working on the previous task.",
+        })
 
     async def _run(params, task, extra=()):
-        res = await backend.run(task, session_id=state["session"], extra_allowed=extra)
-        state["session"] = res.session_id or state["session"]
-        if res.denials:
-            state["pending"] = (task, res.denials, _user_turns(params))
-            await params.result_callback({
-                "status": "needs_confirmation",
-                "action": "; ".join(_describe(d) for d in res.denials),
-                "instruction": "Tell the user in one sentence what it wants to do and ask "
-                               "yes or no. After they answer, call confirm_pending.",
-            })
+        if state["running"]:
+            await _busy(params)
             return
-        state["pending"] = None
-        await params.result_callback(
-            {"status": "error" if res.is_error else "done", "result": res.text}
-        )
+        state["running"] = True
+        try:
+            # Early non-final result: the call is async, so the user can keep talking while it runs.
+            await params.result_callback(
+                {"status": "started", "instruction": "Briefly tell the user you've started; "
+                 "you will be told when it's done."},
+                properties=FunctionCallResultProperties(run_llm=False, is_final=False),
+            )
+            try:
+                res = await backend.run(task, session_id=state["session"], extra_allowed=extra)
+            except Exception as e:  # a background call that never reports back would hang forever
+                logger.error(f"backend failed: {e!r}")
+                res = BackendResult(text="The task failed to run.", is_error=True)
+            state["session"] = res.session_id or state["session"]
+            if res.denials:
+                state["pending"] = (task, res.denials, _user_turns(params))
+                await params.result_callback({
+                    "status": "needs_confirmation",
+                    "action": "; ".join(_describe(d) for d in res.denials),
+                    "instruction": "Tell the user in one sentence what it wants to do and ask "
+                                   "yes or no. After they answer, call confirm_pending.",
+                })
+                return
+            state["pending"] = None
+            await params.result_callback(
+                {"status": "error" if res.is_error else "done", "result": res.text}
+            )
+        finally:
+            state["running"] = False
 
     async def delegate(params, task: str):
         """Hand a real task (files, shell, web, code) to the backend agent and return its answer. Use for anything beyond casual conversation.
@@ -57,6 +84,9 @@ def make_tools(backend):
         """Run the action the user was just asked to approve. Call only after the user has answered the confirmation question."""
         if not state["pending"]:
             await params.result_callback({"status": "nothing_pending"})
+            return
+        if state["running"]:  # keep the pending approval; don't consume it while busy
+            await _busy(params)
             return
         if _user_turns(params) <= state["pending"][2]:
             # The user has not spoken since the question: words in the original request are not an answer.

@@ -17,14 +17,16 @@ class FakeBackend:
 
 
 def make_params(*user_texts):
+    props = []
     out = []
 
-    async def cb(r, **kw):
+    async def cb(r, properties=None, **kw):
         out.append(r)
+        props.append(properties)
 
     msgs = [{"role": "user", "content": t} for t in user_texts]
     ctx = SimpleNamespace(get_messages=lambda: msgs)
-    return SimpleNamespace(result_callback=cb, context=ctx), out
+    return SimpleNamespace(result_callback=cb, context=ctx, props=props), out
 
 
 def run(coro):
@@ -113,3 +115,59 @@ def test_denial_without_tool_name_does_not_crash():
     p, out = make_params("x", "yes")
     run(confirm(p))
     assert out[-1]["status"] in ("done", "error")
+
+
+def test_delegate_acknowledges_immediately_then_reports():
+    b = FakeBackend([BackendResult("big.iso", "s1")])
+    delegate, _ = make_tools(b)
+    p, out = make_params("biggest file?")
+    run(delegate(p, "biggest file?"))
+    assert [o["status"] for o in out] == ["started", "done"]
+    assert p.props[0].is_final is False and p.props[0].run_llm is False  # ack must not re-run the LLM
+    assert p.props[1] is None  # final result uses the defaults
+
+
+class GatedBackend:
+    def __init__(self, gate):
+        self.gate, self.calls = gate, []
+
+    async def run(self, task, session_id=None, extra_allowed=()):
+        self.calls.append(task)
+        await self.gate.wait()
+        return BackendResult("done it", "s1")
+
+
+def test_second_task_while_running_is_busy_then_allowed_after():
+    async def go():
+        gate = asyncio.Event()
+        b = GatedBackend(gate)
+        delegate, _ = make_tools(b)
+        p1, out1 = make_params("a")
+        p2, out2 = make_params("a", "b")
+        t = asyncio.create_task(delegate(p1, "first"))
+        await asyncio.sleep(0)
+        await delegate(p2, "second")
+        gate.set()
+        await t
+        p3, out3 = make_params("a", "b", "c")
+        await delegate(p3, "third")
+        return b, out1, out2, out3
+
+    b, out1, out2, out3 = run(asyncio.wait_for(go(), 3))  # RED must fail, not hang
+    assert [o["status"] for o in out2] == ["busy"] and b.calls == ["first", "third"]
+    assert out1[-1]["status"] == "done" and out3[-1]["status"] == "done"
+
+
+class RaisingBackend:
+    async def run(self, task, session_id=None, extra_allowed=()):
+        raise OSError("spawn failed")
+
+
+def test_backend_crash_still_reports_error_and_frees_the_slot():
+    delegate, _ = make_tools(RaisingBackend())
+    p, out = make_params("x")
+    run(delegate(p, "x"))  # must not raise: a background call that never reports hangs forever
+    assert out[-1]["status"] == "error"
+    p2, out2 = make_params("x", "y")
+    run(delegate(p2, "y"))
+    assert out2[-1]["status"] == "error"  # not "busy": the slot was released
