@@ -36,7 +36,7 @@ from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transports.base_transport import TransportParams
 from pipecat.utils.time import time_now_iso8601
 from registry import Registry
-from relay import Relay, make_bridge_tools
+from relay import Relay, make_bridge_tools, start_session
 
 load_dotenv()
 
@@ -58,7 +58,9 @@ SYSTEM_PROMPT = (
     "plain sentences with no markdown, lists, or emoji. Keep answers to one to "
     "three sentences unless asked for more. For anything that needs files, the "
     "shell, the web, or code, call delegate(task) and say one short line like "
-    "'on it' first. If a delegate result is a question from Claude, ask the user "
+    "'on it' first. If the task will create or change files and the user has not said where, "
+    "ask which folder to use; if they do not care, call delegate without a directory and it "
+    "works in a private default workspace. If a delegate result is a question from Claude, ask the user "
     "and call delegate again with their reply. When you are told a Claude session "
     "needs a decision, ask the user, then call answer_question after they answer. "
     "Use list_sessions to answer what Claude is doing and stop_session to stop one. "
@@ -125,7 +127,8 @@ async def bot(runner_args: RunnerArguments):
     tools = []
     if backend.available():
         settings_for = lambda sid: write_run_settings(DATA / "runs", sid, HOOK_TOKEN, cfg.hook_port)
-        tools = [*make_tools(backend, registry, settings_for, on_finish=bridge.expire_session),
+        tools = [*make_tools(backend, registry, settings_for, on_finish=bridge.expire_session,
+                             workspace_root=Path(cfg.workspace_dir).expanduser()),
                  *make_bridge_tools(bridge, relay, registry, backend)]
         for t in tools:
             # Spec: barge-in cancels speech, not the task. (Default True would cancel the handler.)
@@ -155,9 +158,7 @@ async def bot(runner_args: RunnerArguments):
 
     @transport.event_handler("on_client_connected")
     async def on_connected(transport, client):
-        context.add_message({"role": "developer", "content": "Greet the user in one short sentence."})
-        await task.queue_frames([user_agg.get_context_frame()])
-        await relay.attach_and_pump(task, context)  # raises any question waiting for the user
+        await start_session(relay, task, context)  # attaches the relay first, then greets
 
     @transport.event_handler("on_client_disconnected")
     async def on_disconnected(transport, client):

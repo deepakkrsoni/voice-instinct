@@ -49,8 +49,10 @@ def _kill_group(proc) -> None:
 
 
 class ClaudeCodeBackend:
-    def __init__(self, cmd: str = "claude", cwd: str | None = None, timeout: float = 120):
-        self.cmd, self.cwd, self.timeout = cmd, cwd, timeout
+    def __init__(self, cmd: str = "claude", cwd: str | None = None, timeout: float = 120,
+                 permission_mode: str | None = "acceptEdits"):
+        # acceptEdits: file edits inside the task's own folder don't prompt; shell commands still do.
+        self.cmd, self.cwd, self.timeout, self.permission_mode = cmd, cwd, timeout, permission_mode
         self._procs: dict[str, asyncio.subprocess.Process] = {}
         self._stopped: set[str] = set()
 
@@ -72,6 +74,7 @@ class ClaudeCodeBackend:
         resume: bool = False,
         settings: str | None = None,
         extra_allowed: Iterable[str] = (),
+        cwd: str | None = None,
     ) -> BackendResult:
         if not self.available():
             return BackendResult(text="The Claude CLI is not installed.", is_error=True)
@@ -82,9 +85,11 @@ class ClaudeCodeBackend:
             args += ["--resume" if resume else "--session-id", session_id]
         if settings:
             args += ["--settings", settings]
+        if self.permission_mode:
+            args += ["--permission-mode", self.permission_mode]
         args += ["--", task]  # "--": a task starting with dashes must stay text, never a flag
         proc = await asyncio.create_subprocess_exec(
-            *args, cwd=self.cwd, stdin=asyncio.subprocess.DEVNULL,
+            *args, cwd=cwd or self.cwd, stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
             start_new_session=True,  # own process group so we can kill its Bash children too
         )

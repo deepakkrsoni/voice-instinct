@@ -5,7 +5,7 @@ import re
 import time
 
 from confirm import classify, last_user_text
-from pipecat.frames.frames import LLMMessagesAppendFrame
+from pipecat.frames.frames import LLMMessagesAppendFrame, LLMRunFrame
 
 
 def _quote_safe(text):
@@ -90,6 +90,14 @@ class Relay:
             await self._task.queue_frames(
                 [LLMMessagesAppendFrame(messages=[{"role": "developer", "content": text}], run_llm=True)]
             )
+
+
+async def start_session(relay, task, context):
+    """Run when the client connects. Attach first: a failure while greeting must never leave
+    the relay detached, or Claude's permission questions go unspoken and time out into denials."""
+    await relay.attach_and_pump(task, context)
+    context.add_message({"role": "developer", "content": "Greet the user in one short sentence."})
+    await task.queue_frames([LLMRunFrame()])
 
 
 def make_bridge_tools(bridge, relay, registry, backend):

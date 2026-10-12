@@ -12,6 +12,7 @@ class Config:
     backend_cwd: str = str(Path.home())
     backend_timeout: float = 300  # must stay well above permission_timeout
     data_dir: str = "~/.voice-instinct"
+    workspace_dir: str = "~/.voice-instinct/workspace"  # default folder for tasks that name none
     permission_timeout: float = 90
     hook_port: int = 7860
 

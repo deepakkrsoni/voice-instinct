@@ -7,16 +7,20 @@ from loguru import logger
 
 from backend import BackendResult
 from pipecat.frames.frames import FunctionCallResultProperties
+from workspace import resolve_workdir
 
 
-def make_tools(backend, registry, settings_for, on_finish=None):
-    state = {"session": None, "running": False}  # ponytail: one task at a time, single user
+def make_tools(backend, registry, settings_for, on_finish=None, workspace_root=None, home=None):
+    home = Path(home) if home else Path.home()
+    workspace_root = Path(workspace_root) if workspace_root else home / ".voice-instinct" / "workspace"
+    state = {"session": None, "cwd": None, "running": False}  # ponytail: one task at a time, single user
 
-    async def delegate(params, task: str):
+    async def delegate(params, task: str, directory: str = ""):
         """Hand a real task (files, shell, web, code) to the backend agent and return its answer. Use for anything beyond casual conversation. If the answer is a question from Claude, ask the user and call this again with their reply to continue the same session.
 
         Args:
             task: A complete, self-contained description of what to do.
+            directory: The folder to work in, only if the user named one (for example ~/code/snake). Leave empty to use the private default workspace or to continue the current session.
         """
         if state["running"]:
             await params.result_callback({
@@ -25,19 +29,32 @@ def make_tools(backend, registry, settings_for, on_finish=None):
             return
         state["running"] = True
         try:
-            resume = state["session"] is not None
-            sid = state["session"] or str(uuid.uuid4())
-            state["session"] = sid
-            registry.upsert_session(sid, origin="delegated", mode="headless", state="running")
+            new_sid = str(uuid.uuid4())
+            try:
+                if directory and directory.strip():
+                    wd = resolve_workdir(directory, task, new_sid, workspace_root, home)
+                    resume = state["session"] is not None and state["cwd"] == str(wd)
+                    sid = state["session"] if resume else new_sid
+                elif state["session"]:
+                    resume, sid, wd = True, state["session"], Path(state["cwd"])
+                else:
+                    resume, sid = False, new_sid
+                    wd = resolve_workdir("", task, sid, workspace_root, home)
+            except (ValueError, OSError) as e:
+                await params.result_callback({"status": "error", "result": str(e)})
+                return
+            state["session"], state["cwd"] = sid, str(wd)
+            registry.upsert_session(sid, origin="delegated", mode="headless", state="running", cwd=str(wd))
             task_id = registry.create_task(sid, task)
-            # Early non-final result: the call is async, so the user can keep talking while it runs.
+            # Early non-final result with run_llm: the call is async, so the user can keep talking
+            # while it runs, and Gemini goes straight to the tool call without saying anything first.
             await params.result_callback(
-                {"status": "started", "instruction": "Briefly tell the user you've started; "
-                 "you will be told when it's done."},
-                properties=FunctionCallResultProperties(run_llm=False, is_final=False))
+                {"status": "started", "instruction": "In one short sentence tell the user you've "
+                 "started and where; you will be told when it's done."},
+                properties=FunctionCallResultProperties(run_llm=True, is_final=False))
             settings = settings_for(sid)
             try:
-                res = await backend.run(task, session_id=sid, resume=resume, settings=settings)
+                res = await backend.run(task, session_id=sid, resume=resume, settings=settings, cwd=str(wd))
             except Exception as e:  # a background call that never reports back would hang forever
                 logger.error(f"backend failed: {e!r}")
                 res = BackendResult(text="The task failed to run.", is_error=True)

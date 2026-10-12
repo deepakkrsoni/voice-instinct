@@ -136,3 +136,14 @@ def test_stop_kills_a_running_session_and_run_reports_it(tmp_path):
 
     ok, r, again = asyncio.run(go())
     assert ok and r.is_error and "stopped" in r.text and again is False
+
+
+def test_run_uses_the_given_cwd_and_accept_edits_mode(tmp_path):
+    cli = _script(tmp_path, 'printf \'{"type":"result","result":"%s|%s"}\\n\' "$(pwd)" "$*"\n')
+    work = tmp_path / "work"
+    work.mkdir()
+    r = asyncio.run(ClaudeCodeBackend(cmd=cli, cwd=str(tmp_path)).run("t", cwd=str(work)))
+    cwd, args = r.text.split("|", 1)
+    assert cwd == str(work) and "--permission-mode acceptEdits" in args
+    plain = asyncio.run(ClaudeCodeBackend(cmd=cli, permission_mode=None).run("t")).text
+    assert "--permission-mode" not in plain

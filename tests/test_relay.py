@@ -3,7 +3,8 @@ from types import SimpleNamespace
 
 from hooks import HookBridge
 from registry import Registry
-from relay import Relay, frame_question, make_bridge_tools
+from pipecat.frames.frames import LLMRunFrame
+from relay import Relay, frame_question, make_bridge_tools, start_session
 
 
 class FakeTask:
@@ -14,7 +15,7 @@ class FakeTask:
         self.frames += frames
         if self.ctx is not None:  # the real pipeline lands the message in the context
             for f in frames:
-                self.ctx.msgs += f.messages
+                self.ctx.msgs += getattr(f, "messages", [])
 
 
 class FakeContext:
@@ -257,3 +258,47 @@ def test_a_user_reply_without_the_assistant_asking_does_not_count():
 
     out, fut = run(go())
     assert out[-1]["status"] == "unclear" and not fut.done()
+
+
+class RecordingContext(FakeContext):
+    def add_message(self, m):
+        self.msgs.append(m)
+
+
+def test_start_session_attaches_the_relay_and_greets_with_an_llm_run():
+    async def go():
+        reg = Registry()
+        relay, ctx = Relay(reg), RecordingContext()
+        task = FakeTask(ctx)
+        await start_session(relay, task, ctx)
+        return relay, task
+
+    relay, task = run(go())
+    assert relay._task is task
+    assert any(isinstance(f, LLMRunFrame) for f in task.frames)
+
+
+def test_a_failing_greeting_must_not_leave_the_relay_detached():
+    # The demo failure: the greeting raised, and the relay (attached after it) never was,
+    # so Claude's permission questions were never spoken and timed out into denials.
+    class BrokenGreetingTask(FakeTask):
+        async def queue_frames(self, frames):
+            if any(isinstance(f, LLMRunFrame) for f in frames):
+                raise AttributeError("greeting exploded")
+            await super().queue_frames(frames)
+
+    async def go():
+        reg = Registry()
+        reg.upsert_session("s1")
+        q = reg.add_question("s1", "permission", "ls", "Bash", {"command": "ls"})
+        relay, ctx = Relay(reg), RecordingContext()
+        task = BrokenGreetingTask(ctx)
+        try:
+            await start_session(relay, task, ctx)
+        except AttributeError:
+            pass
+        return relay, task, q
+
+    relay, task, q = run(go())
+    assert relay._task is task
+    assert any(f"question_id={q})" in m.get("content", "") for m in task.ctx.msgs)  # still spoken

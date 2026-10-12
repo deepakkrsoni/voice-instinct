@@ -10,8 +10,8 @@ class FakeBackend:
     def __init__(self, results):
         self.results, self.calls = list(results), []
 
-    async def run(self, task, session_id=None, resume=False, settings=None, extra_allowed=()):
-        self.calls.append({"task": task, "sid": session_id, "resume": resume, "settings": settings})
+    async def run(self, task, session_id=None, resume=False, settings=None, extra_allowed=(), cwd=None):
+        self.calls.append({"task": task, "sid": session_id, "resume": resume, "settings": settings, "cwd": cwd})
         return self.results.pop(0)
 
 
@@ -41,7 +41,7 @@ def test_delegate_acknowledges_then_reports_and_records_everything():
     p, out = make_params()
     run(delegate(p, "biggest file?"))
     assert [o["status"] for o in out] == ["started", "done"] and out[-1]["result"] == "big.iso"
-    assert p.props[0].is_final is False and p.props[0].run_llm is False and p.props[1] is None
+    assert p.props[0].is_final is False and p.props[0].run_llm is True and p.props[1] is None  # the user hears 'on it'
     call = b.calls[0]
     assert call["resume"] is False and call["settings"] == f"/settings/{call['sid']}.json"
     s = reg.get_session(call["sid"])
@@ -61,7 +61,7 @@ class GatedBackend:
     def __init__(self, gate):
         self.gate, self.calls = gate, []
 
-    async def run(self, task, session_id=None, resume=False, settings=None, extra_allowed=()):
+    async def run(self, task, session_id=None, resume=False, settings=None, extra_allowed=(), cwd=None):
         self.calls.append(task)
         await self.gate.wait()
         return BackendResult("done it")
@@ -115,3 +115,46 @@ def test_settings_file_is_removed_and_open_questions_released_after_a_run(tmp_pa
     p, out = make_params()
     run(delegate(p, "x"))
     assert not f.exists() and len(finished) == 1 and out[-1]["status"] == "done"
+
+
+def with_dirs(tmp_path, results):
+    reg, b = Registry(), FakeBackend(results)
+    (delegate,) = make_tools(b, reg, lambda sid: None, workspace_root=tmp_path / "ws", home=tmp_path)
+    return reg, b, delegate
+
+
+def test_no_directory_uses_a_private_default_workspace_and_records_it(tmp_path):
+    reg, b, delegate = with_dirs(tmp_path, [BackendResult("ok")])
+    run(delegate(make_params()[0], "write a snake game"))
+    cwd = b.calls[0]["cwd"]
+    assert cwd.startswith(str((tmp_path / "ws").resolve())) and (tmp_path / "ws").is_dir()
+    assert reg.get_session(b.calls[0]["sid"])["cwd"] == cwd
+
+
+def test_named_directory_is_used_and_follow_ups_stay_in_it(tmp_path):
+    reg, b, delegate = with_dirs(tmp_path, [BackendResult("a"), BackendResult("b"), BackendResult("c")])
+    run(delegate(make_params()[0], "make it", "~/code/snake"))
+    run(delegate(make_params()[0], "add scores"))  # no directory: same session, same folder
+    run(delegate(make_params()[0], "again", "~/code/snake"))  # same folder named again: still resumes
+    assert {c["cwd"] for c in b.calls} == {str((tmp_path / "code" / "snake").resolve())}
+    assert [c["resume"] for c in b.calls] == [False, True, True]
+    assert len({c["sid"] for c in b.calls}) == 1
+
+
+def test_a_different_directory_starts_a_new_session(tmp_path):
+    reg, b, delegate = with_dirs(tmp_path, [BackendResult("a"), BackendResult("b")])
+    run(delegate(make_params()[0], "one", "~/a"))
+    run(delegate(make_params()[0], "two", "~/b"))
+    assert b.calls[1]["resume"] is False and b.calls[1]["sid"] != b.calls[0]["sid"]
+    assert len(reg.list_sessions()) == 2
+
+
+def test_directory_outside_home_is_refused_without_starting_anything(tmp_path):
+    reg, b, delegate = with_dirs(tmp_path, [BackendResult("never")])
+    p, out = make_params()
+    run(delegate(p, "wipe it", "/etc"))
+    assert out[-1]["status"] == "error" and "home" in out[-1]["result"]
+    assert b.calls == [] and reg.list_sessions() == []
+    p2, out2 = make_params()
+    run(asyncio.wait_for(delegate(p2, "ok now", "~/fine"), 2))  # the slot was released
+    assert out2[-1]["status"] != "busy"
