@@ -24,3 +24,11 @@ def test_last_user_text_handles_str_and_parts():
     ]
     assert last_user_text(msgs) == "not sure"
     assert last_user_text([]) == ""
+
+
+def test_user_turns_counts_only_user_messages():
+    from confirm import user_turns
+
+    msgs = [{"role": "user", "content": "a"}, {"role": "assistant", "content": "b"},
+            {"role": "developer", "content": "c"}, {"role": "user", "content": "d"}]
+    assert user_turns(msgs) == 2 and user_turns([]) == 0
