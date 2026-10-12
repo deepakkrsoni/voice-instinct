@@ -124,3 +124,67 @@ def test_run_settings_point_at_token_url(tmp_path):
     h = hooks["PermissionRequest"][0]["hooks"][0]
     assert h["type"] == "http" and h["url"] == "http://127.0.0.1:7860/hook/tok/PermissionRequest"
     assert h["timeout"] == 100
+
+
+def test_cancelled_handler_cleans_up_waiter_question_and_relay():
+    async def go():
+        b, reg, relay = make()
+        t = asyncio.create_task(b.on_permission_request(PAYLOAD))
+        await asyncio.sleep(0)
+        t.cancel()
+        try:
+            await t
+        except asyncio.CancelledError:
+            pass
+        return b, reg, relay
+
+    b, reg, relay = asyncio.run(go())
+    assert b._waiters == {} and reg.get_question(1)["status"] == "expired" and relay.closed == [1]
+    assert reg.get_session("s1")["state"] == "running"
+
+
+def test_relay_failure_does_not_leave_a_zombie_question():
+    class BoomRelay(FakeRelay):
+        async def raise_question(self, qid):
+            raise RuntimeError("boom")
+
+    async def go():
+        reg, relay = Registry(), BoomRelay()
+        b = HookBridge(reg, relay, permission_timeout=5)
+        try:
+            await b.on_permission_request(PAYLOAD)
+        except RuntimeError:
+            pass
+        return b, reg, relay
+
+    b, reg, relay = asyncio.run(go())
+    assert b._waiters == {} and reg.get_question(1)["status"] == "expired" and relay.closed == [1]
+
+
+def test_expire_session_releases_only_that_sessions_waiters():
+    async def go():
+        b, reg, relay = make()
+        other = dict(PAYLOAD, session_id="s2")
+        t1 = asyncio.create_task(b.on_permission_request(PAYLOAD))
+        t2 = asyncio.create_task(b.on_permission_request(other))
+        await asyncio.sleep(0)
+        b.expire_session("s1")
+        r1 = await asyncio.wait_for(t1, 2)
+        assert not t2.done()
+        b.resolve(2, "allow")
+        return r1, await t2
+
+    r1, r2 = asyncio.run(go())
+    assert r1 == {} and r2 == hook_response("allow")
+
+
+def test_settings_file_is_private_and_access_log_hides_tokens(tmp_path):
+    import logging
+
+    from hooks import hide_hook_tokens
+
+    path = write_run_settings(tmp_path, "s", "tok", 7860)
+    assert stat.S_IMODE(__import__("os").stat(path).st_mode) == 0o600
+    hook_line = logging.LogRecord("uvicorn.access", 20, "", 0, '"POST /hook/tok/Stop" 200', None, None)
+    other = logging.LogRecord("uvicorn.access", 20, "", 0, '"GET / HTTP/1.1" 200', None, None)
+    assert hide_hook_tokens(hook_line) is False and hide_hook_tokens(other) is True

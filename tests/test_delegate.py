@@ -104,3 +104,14 @@ def test_backend_crash_reports_error_frees_the_slot_and_marks_task_failed():
     assert out2[-1]["status"] == "error"  # not "busy"
     statuses = [r[0] for r in reg.db.execute("SELECT status FROM tasks ORDER BY id")]
     assert statuses == ["error", "error"]
+
+
+def test_settings_file_is_removed_and_open_questions_released_after_a_run(tmp_path):
+    f = tmp_path / "run.json"
+    f.write_text("{}")
+    finished = []
+    (delegate,) = make_tools(FakeBackend([BackendResult("ok")]), Registry(), lambda sid: str(f),
+                             on_finish=finished.append)
+    p, out = make_params()
+    run(delegate(p, "x"))
+    assert not f.exists() and len(finished) == 1 and out[-1]["status"] == "done"

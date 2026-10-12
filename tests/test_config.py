@@ -3,7 +3,7 @@ from config import load
 
 def test_defaults_when_file_missing(tmp_path):
     c = load(tmp_path / "nope.toml")
-    assert c.provider == "gemini" and c.model == "gemini-3.8-flash" and c.backend_timeout == 120
+    assert c.provider == "gemini" and c.model == "gemini-3.8-flash" and c.backend_timeout == 300
 
 
 def test_overrides(tmp_path):

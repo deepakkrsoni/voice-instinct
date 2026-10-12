@@ -41,6 +41,13 @@ class HookBridge:
         fut.set_result(decision)
         return True
 
+    def expire_session(self, session_id):
+        """Release hooks still waiting on this session (its run ended or was stopped)."""
+        for qid, fut in list(self._waiters.items()):
+            q = self.reg.get_question(qid)
+            if q and q["session_id"] == session_id and not fut.done():
+                fut.set_result(None)
+
     async def on_permission_request(self, p):
         sid = p["session_id"]
         self.reg.upsert_session(sid, cwd=p.get("cwd"))
@@ -49,21 +56,25 @@ class HookBridge:
                                     p.get("tool_name"), p.get("tool_input"))
         fut = self._waiters.get(qid)
         first = fut is None
-        if first:
-            fut = self._waiters[qid] = asyncio.get_running_loop().create_future()
-            self.reg.set_state(sid, "waiting_input")
-            await self.relay.raise_question(qid)
+        decision = None
         try:
+            if first:
+                fut = self._waiters[qid] = asyncio.get_running_loop().create_future()
+                self.reg.set_state(sid, "waiting_input")
+                await self.relay.raise_question(qid)
             decision = await asyncio.wait_for(asyncio.shield(fut), self.timeout)
         except asyncio.TimeoutError:
             decision = None
-        if first:  # only the first delivery closes the question
-            self._waiters.pop(qid, None)
-            self.reg.resolve_question(qid, "answered" if decision else "expired", decision)
-            self.reg.set_state(sid, "running")
-            self.relay.question_closed(qid)
-            if not fut.done():
-                fut.set_result(decision)
+        finally:  # also runs on cancellation or a relay failure: never leave a zombie question
+            if first:  # only the first delivery closes the question
+                self._waiters.pop(qid, None)
+                self.reg.resolve_question(qid, "answered" if decision else "expired", decision)
+                s = self.reg.get_session(sid)
+                if s and s["state"] == "waiting_input":  # do not resurrect an ended session
+                    self.reg.set_state(sid, "running")
+                self.relay.question_closed(qid)
+                if not fut.done():
+                    fut.set_result(decision)
         return hook_response(decision)
 
     async def on_event(self, event, p):
@@ -103,6 +114,11 @@ def make_router(bridge, token):
     return router
 
 
+def hide_hook_tokens(record):
+    """Logging filter for uvicorn's access log: hook URLs carry the secret token."""
+    return "/hook/" not in record.getMessage()
+
+
 def load_token(path):
     p = Path(path)
     if p.exists():
@@ -121,5 +137,7 @@ def write_run_settings(directory, session_id, token, port, hook_timeout=100):
     hooks = {e: [{"hooks": [{"type": "http", "timeout": hook_timeout,
                              "url": f"http://127.0.0.1:{port}/hook/{token}/{e}"}]}] for e in _EVENTS}
     path = d / f"{session_id}.json"
-    path.write_text(json.dumps({"hooks": hooks}))
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)  # the URL holds the token
+    with os.fdopen(fd, "w") as f:
+        f.write(json.dumps({"hooks": hooks}))
     return str(path)

@@ -8,6 +8,8 @@ from pathlib import Path
 import numpy as np
 import sherpa_onnx
 from dotenv import load_dotenv
+import logging
+
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -26,7 +28,7 @@ from pipecat.runner.utils import create_transport
 from backend import ClaudeCodeBackend
 from config import load
 from delegate import make_tools
-from hooks import HookBridge, load_token, make_router, write_run_settings
+from hooks import HookBridge, hide_hook_tokens, load_token, make_router, write_run_settings
 from pipecat.services.google.llm import GoogleLLMService
 from pipecat.services.kokoro.tts import KokoroTTSService
 from pipecat.services.openai.llm import OpenAILLMService
@@ -49,6 +51,7 @@ relay = Relay(registry)
 bridge = HookBridge(registry, relay, cfg.permission_timeout)
 HOOK_TOKEN = load_token(DATA / "hook-token")
 app.include_router(make_router(bridge, HOOK_TOKEN))  # hooks share the runner's app and port
+logging.getLogger("uvicorn.access").addFilter(hide_hook_tokens)  # the token is in the URL
 
 SYSTEM_PROMPT = (
     "You are a voice assistant. Your replies are spoken aloud, so use short, "
@@ -122,7 +125,7 @@ async def bot(runner_args: RunnerArguments):
     tools = []
     if backend.available():
         settings_for = lambda sid: write_run_settings(DATA / "runs", sid, HOOK_TOKEN, cfg.hook_port)
-        tools = [*make_tools(backend, registry, settings_for),
+        tools = [*make_tools(backend, registry, settings_for, on_finish=bridge.expire_session),
                  *make_bridge_tools(bridge, relay, registry, backend)]
         for t in tools:
             # Spec: barge-in cancels speech, not the task. (Default True would cancel the handler.)

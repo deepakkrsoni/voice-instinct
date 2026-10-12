@@ -1,6 +1,7 @@
 """LLM tool: hand real work to the backend agent as a tracked, background Claude session."""
 
 import uuid
+from pathlib import Path
 
 from loguru import logger
 
@@ -8,7 +9,7 @@ from backend import BackendResult
 from pipecat.frames.frames import FunctionCallResultProperties
 
 
-def make_tools(backend, registry, settings_for):
+def make_tools(backend, registry, settings_for, on_finish=None):
     state = {"session": None, "running": False}  # ponytail: one task at a time, single user
 
     async def delegate(params, task: str):
@@ -34,11 +35,17 @@ def make_tools(backend, registry, settings_for):
                 {"status": "started", "instruction": "Briefly tell the user you've started; "
                  "you will be told when it's done."},
                 properties=FunctionCallResultProperties(run_llm=False, is_final=False))
+            settings = settings_for(sid)
             try:
-                res = await backend.run(task, session_id=sid, resume=resume, settings=settings_for(sid))
+                res = await backend.run(task, session_id=sid, resume=resume, settings=settings)
             except Exception as e:  # a background call that never reports back would hang forever
                 logger.error(f"backend failed: {e!r}")
                 res = BackendResult(text="The task failed to run.", is_error=True)
+            finally:
+                if settings:  # holds the hook token: do not leave it lying around
+                    Path(settings).unlink(missing_ok=True)
+                if on_finish:  # a run that ended can no longer use an answer
+                    on_finish(sid)
             status = "error" if res.is_error else "done"
             registry.finish_task(task_id, status, res.text[:500])
             registry.set_state(sid, "idle")
