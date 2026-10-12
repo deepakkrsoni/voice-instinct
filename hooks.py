@@ -131,7 +131,7 @@ def load_token(path):
     return tok
 
 
-def write_run_settings(directory, session_id, token, port, hook_timeout=100):
+def write_run_settings(directory, session_id, token, port, hook_timeout=100, extra=None):
     d = Path(directory)
     d.mkdir(parents=True, exist_ok=True)
     hooks = {e: [{"hooks": [{"type": "http", "timeout": hook_timeout,
@@ -139,5 +139,5 @@ def write_run_settings(directory, session_id, token, port, hook_timeout=100):
     path = d / f"{session_id}.json"
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)  # the URL holds the token
     with os.fdopen(fd, "w") as f:
-        f.write(json.dumps({"hooks": hooks}))
+        f.write(json.dumps({"hooks": hooks, **(extra or {})}))  # extra: sandbox + deny rules
     return str(path)

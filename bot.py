@@ -6,6 +6,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from loguru import logger
 
+from autonomy import sandbox_settings
 from backend import ClaudeCodeBackend
 from config import load
 from delegate import make_tools
@@ -67,11 +68,14 @@ async def bot(runner_args: RunnerArguments):
     transport = await create_transport(runner_args, transport_params)
 
     stt = ParakeetSTTService()
-    backend = ClaudeCodeBackend(cwd=cfg.backend_cwd, timeout=cfg.backend_timeout)
+    backend = ClaudeCodeBackend(cwd=cfg.backend_cwd, timeout=cfg.backend_timeout,
+                                permission_mode=cfg.permission_mode)
     llm = build_llm(cfg, SYSTEM_PROMPT)
     tools = []
     if backend.available():
-        settings_for = lambda sid: write_run_settings(DATA / "runs", sid, HOOK_TOKEN, cfg.hook_port)
+        autonomy = sandbox_settings(Path.home(), Path(__file__).parent, DATA)
+        settings_for = lambda sid: write_run_settings(
+            DATA / "runs", sid, HOOK_TOKEN, cfg.hook_port, extra=autonomy)
         # Tools declare their own options with @tool_options; LLMContext(tools=...) is the registration.
         tools = [*make_tools(backend, registry, settings_for, on_finish=bridge.expire_session,
                              workspace_root=Path(cfg.workspace_dir).expanduser()),

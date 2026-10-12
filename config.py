@@ -15,6 +15,7 @@ class Config:
     workspace_dir: str = "~/.voice-instinct/workspace"  # default folder for tasks that name none
     permission_timeout: float = 90
     hook_port: int = 7860
+    permission_mode: str = "auto"  # Claude Code mode for delegated runs; the sandbox bounds what auto may do
 
 
 def load(path="config.toml") -> Config:

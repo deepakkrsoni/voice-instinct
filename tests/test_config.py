@@ -20,3 +20,7 @@ def test_bridge_defaults():
 
 def test_workspace_default_is_a_dot_folder_in_home():
     assert load("/nonexistent.toml").workspace_dir == "~/.voice-instinct/workspace"
+
+
+def test_auto_permission_mode_is_the_default():
+    assert load("/nonexistent.toml").permission_mode == "auto"
