@@ -48,7 +48,9 @@ def serve(decision):
 
 def run_touch(tmp_path, port, name):
     settings = write_run_settings(tmp_path / "s", "sid", "tok", port)
-    b = ClaudeCodeBackend(cwd=str(tmp_path), timeout=120)
+    # "default" mode on purpose: these tests exercise the permission-hook mechanism, so the command
+    # must need approval. (Under the product's auto/acceptEdits modes `touch` here would not prompt.)
+    b = ClaudeCodeBackend(cwd=str(tmp_path), timeout=120, permission_mode="default")
     return asyncio.run(b.run(
         f"Create an empty file named {name} using the shell command: touch {name}", settings=settings))
 
