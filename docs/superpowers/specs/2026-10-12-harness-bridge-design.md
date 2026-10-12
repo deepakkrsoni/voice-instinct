@@ -70,17 +70,16 @@ Relay: frames event as a quoted-data message to the front LLM -> speaks it -> yo
 because everything links: a task spans sessions, a session has many events and questions.
 Foreign keys on, WAL mode.
 
-- `tasks(id PK, request, status, created_at, finished_at, summary)`: what you asked for, in your words.
-- `sessions(id PK = claude session_id, task_id FK nullable, name, cwd, origin, mode, state,
+- `tasks(id PK, session_id FK, request, status, created_at, finished_at, summary)`: what you asked for, in your words. A session has many tasks (each follow-up resumes the same session).
+- `sessions(id PK = claude session_id, name, cwd, origin, mode, state,
   tmux_name, started_at, ended_at, end_reason)`. `origin`: delegated | external. `mode`:
   headless | watched | interactive. `state`: running | waiting_input | idle | ended.
 - `events(id PK, session_id FK, kind, payload_json, at)`: every hook delivery, append-only.
 - `questions(id PK, session_id FK, kind, tool_name, tool_input_json, prompt, framed_text, status,
-  answer, asked_at, answered_at)`. `kind`: permission | clarify. `status`: open | answered | expired.
+  answer, asked_at, answered_at)`. `kind`: permission (a clarifying question reaches the user as the delegate result; the user's reply is a second delegate call that resumes the session). `status`: open | answered | expired.
 Indexes on `events(session_id, at)` and `questions(status)`.
 
-**HookServer (`hooks.py`).** A small ASGI app (Starlette, already a dependency) served in the bot
-process on `127.0.0.1:8787`. Route `/hook/<token>/<event>`; the token is a random secret stored in
+**HookServer (`hooks.py`).** Extra routes added to Pipecat's own runner app (`from pipecat.runner.run import app`), so hooks share the voice page's process, event loop and port (`127.0.0.1:7860`). Route `/hook/<token>/<event>`; the token is a random secret stored in
 `~/.voice-instinct/hook-token` (mode 0600), because any local process could otherwise POST fake
 events. Handlers record the event, upsert the session, then: `PermissionRequest` creates a
 question, hands it to the Relay, and **blocks** until answered or `permission_timeout` (default

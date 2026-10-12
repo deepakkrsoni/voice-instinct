@@ -12,8 +12,11 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28.1",
     "pytest>=9.1.1",
 ]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+markers = ["claude: needs the real claude CLI and network"]
+addopts = "-m 'not claude'"

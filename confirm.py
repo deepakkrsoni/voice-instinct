@@ -27,3 +27,7 @@ def last_user_text(messages: list[dict]) -> str:
         if isinstance(c, list):
             return " ".join(p.get("text", "") for p in c if isinstance(p, dict))
     return ""
+
+
+def user_turns(messages: list[dict]) -> int:
+    return sum(1 for m in messages if m.get("role") == "user")

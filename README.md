@@ -32,18 +32,49 @@ Paths are hardcoded at the top of `bot.py` for now.
 | `model` | model id, default `gemini-3.8-flash` |
 | `base_url` | OpenAI-compatible endpoint (Ollama defaults to `localhost:11434`) |
 | `api_key_env` | env var holding the key |
-| `backend_cwd`, `backend_timeout` | where the backend agent works (default home) and its timeout (120 s) |
+| `permission_mode` | Claude Code mode for delegated runs (default `auto`) |
+| `workspace_dir` | default task folder (default `~/.voice-instinct/workspace`) |
+| `backend_cwd`, `backend_timeout` | where the backend agent works (default home) and its timeout (300 s; keep it well above `permission_timeout`, 90 s) |
 
-## Safety
+## Safety and autonomy
 
-The backend starts read-only (`Read/Glob/Grep` and a few `Bash(ls|du|find|stat|wc|cat)` commands).
-Anything else is blocked, the assistant tells you what it wants to do and asks yes/no, and only an
-explicit spoken "yes" (decided by code on your actual words, not by the LLM) re-runs it. Approving
-allows only the exact blocked command for that one retry. A "yes" only counts if you spoke after the
-question was asked. `find` is not allowed read-only because it can delete.
+Delegated tasks run autonomously, like a personal agent, inside a bounded box:
+
+- **Claude Code `auto` mode** (`permission_mode` in `config.toml`): routine actions go ahead, and a
+  classifier blocks escalation and actions steered by hostile content.
+- **Claude Code's built-in sandbox** (needs `bubblewrap` and `socat`; it refuses to start without
+  them): shell commands run without prompts but can only write inside the task folder and reach
+  approved network domains. It fails closed and the agent cannot retry a command outside it.
+- **Secrets walled off** in both the sandbox and the file-tool permission rules: `~/.ssh`, `~/.aws`,
+  `~/.gnupg`, `~/.config/gh`, `~/.kube`, credential files, this app's `.env`, its token and database.
+  Deny rules hold in every permission mode.
+- **Each task gets its own folder**: the one you name (inside your home directory only) or a private
+  default workspace at `~/.voice-instinct/workspace/`.
+- **Anything that still needs a human reaches you by voice.** A permission request goes through a
+  hook; your spoken yes or no is decided by code from your own words, never by the LLM, and only if
+  the assistant actually asked you. A question or a login code request from the agent arrives as
+  its answer, and your reply resumes the same session.
+
+The sandbox covers shell commands only. File tools, web fetching and MCP/browser tools run outside
+it, which is why the secret deny rules exist and why browsing should use a dedicated profile.
+`backend_cwd` defaults to your home directory; point it at a narrower directory for a tighter boundary.
+
+The hook server listens on localhost only and requires a random token. The token, per-run settings
+files and the database are private to your user (mode 600/700). The database stores every hook
+payload, including commands and file contents Claude proposed to write.
 
 Using a subscription CLI this way depends on the vendor's terms; check them before relying on it.
 
+## Harness bridge
+
+Delegated tasks run as tracked Claude Code sessions. Claude's permission requests reach you by
+voice through a per-run hook (`--settings`, your global Claude settings are untouched): the
+assistant asks, your spoken yes or no (decided by code, never the LLM) unblocks that one call in
+the same run. Sessions, tasks, hook events and questions live in `~/.voice-instinct/harness.db`
+(SQLite). Ask "what's Claude working on?" to list them. Hooks fail open: if this app is not
+running, Claude is unaffected.
+
 ## Tests
 
-`uv run pytest`
+`uv run pytest` runs the unit tests. `uv run pytest -m claude` runs the real-CLI integration tests
+(allow, deny, server-down), which need the `claude` CLI logged in.

@@ -112,3 +112,38 @@ def test_cli_runs_as_own_process_group_leader(tmp_path):
     cli = _script(tmp_path, 'printf \'{"type":"result","result":"%s %s"}\\n\' "$$" "$(awk \'{print $5}\' /proc/$$/stat)"\n')
     pid, pgid = asyncio.run(ClaudeCodeBackend(cmd=cli).run("x")).text.split()
     assert pid == pgid
+
+
+def test_new_session_resume_and_settings_flags(tmp_path):
+    cli = _script(tmp_path, 'printf \'{"type":"result","result":"%s"}\\n\' "$*"\n')
+    b = ClaudeCodeBackend(cmd=cli)
+    first = asyncio.run(b.run("t", session_id="abc", settings="/s.json")).text
+    again = asyncio.run(b.run("t", session_id="abc", resume=True)).text
+    assert "--session-id abc" in first and "--settings /s.json" in first and "--resume" not in first
+    assert "--resume abc" in again and "--session-id" not in again
+
+
+def test_stop_kills_a_running_session_and_run_reports_it(tmp_path):
+    cli = _script(tmp_path, "sleep 30\n")
+
+    async def go():
+        b = ClaudeCodeBackend(cmd=cli, timeout=60)
+        t = asyncio.create_task(b.run("x", session_id="s1"))
+        await asyncio.sleep(0.4)
+        ok = await b.stop("s1")
+        r = await t
+        return ok, r, await b.stop("s1")
+
+    ok, r, again = asyncio.run(go())
+    assert ok and r.is_error and "stopped" in r.text and again is False
+
+
+def test_run_uses_the_given_cwd_and_accept_edits_mode(tmp_path):
+    cli = _script(tmp_path, 'printf \'{"type":"result","result":"%s|%s"}\\n\' "$(pwd)" "$*"\n')
+    work = tmp_path / "work"
+    work.mkdir()
+    r = asyncio.run(ClaudeCodeBackend(cmd=cli, cwd=str(tmp_path)).run("t", cwd=str(work)))
+    cwd, args = r.text.split("|", 1)
+    assert cwd == str(work) and "--permission-mode acceptEdits" in args
+    plain = asyncio.run(ClaudeCodeBackend(cmd=cli, permission_mode=None).run("t")).text
+    assert "--permission-mode" not in plain

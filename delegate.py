@@ -1,111 +1,78 @@
-"""LLM tools: hand real work to the backend agent, with code-enforced spoken confirmation."""
+"""LLM tool: hand real work to the backend agent as a tracked, background Claude session."""
+
+import uuid
+from pathlib import Path
 
 from loguru import logger
 
 from backend import BackendResult
-from confirm import classify, last_user_text
+from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.frames.frames import FunctionCallResultProperties
+from pipecat.services.llm_service import FunctionCallParams
+from workspace import resolve_workdir
 
 
-def _describe(d: dict) -> str:
-    inp = d.get("tool_input") or {}
-    detail = inp.get("command") or inp.get("file_path") or inp.get("path") or ""
-    return f"{d.get('tool_name', 'a tool')}: {detail}".strip(": ")
+def make_tools(backend, registry, settings_for, on_finish=None, workspace_root=None, home=None):
+    home = Path(home) if home else Path.home()
+    workspace_root = Path(workspace_root) if workspace_root else home / ".voice-instinct" / "workspace"
+    state = {"session": None, "cwd": None, "running": False}  # ponytail: one task at a time, single user
 
-
-def _user_turns(params) -> int:
-    return sum(1 for m in params.context.get_messages() if m.get("role") == "user")
-
-
-def _allow_rules(denials: list[dict]) -> list[str]:
-    """Narrowest rule per denial: the exact Bash command if known, else the whole tool."""
-    rules = set()
-    for d in denials:
-        name, cmd = d.get("tool_name"), (d.get("tool_input") or {}).get("command")
-        if name == "Bash" and cmd:
-            rules.add(f"Bash({cmd})")
-        elif name:
-            rules.add(name)
-    return sorted(rules)
-
-
-def make_tools(backend):
-    state = {"session": None, "pending": None, "running": False}  # ponytail: one task at a time, single user
-
-    async def _busy(params):
-        await params.result_callback({
-            "status": "busy",
-            "instruction": "Tell the user you are still working on the previous task.",
-        })
-
-    async def _run(params, task, extra=()):
-        if state["running"]:
-            await _busy(params)
-            return
-        state["running"] = True
-        try:
-            # Early non-final result: the call is async, so the user can keep talking while it runs.
-            await params.result_callback(
-                {"status": "started", "instruction": "Briefly tell the user you've started; "
-                 "you will be told when it's done."},
-                properties=FunctionCallResultProperties(run_llm=False, is_final=False),
-            )
-            try:
-                res = await backend.run(task, session_id=state["session"], extra_allowed=extra)
-            except Exception as e:  # a background call that never reports back would hang forever
-                logger.error(f"backend failed: {e!r}")
-                res = BackendResult(text="The task failed to run.", is_error=True)
-            state["session"] = res.session_id or state["session"]
-            if res.denials:
-                state["pending"] = (task, res.denials, _user_turns(params))
-                await params.result_callback({
-                    "status": "needs_confirmation",
-                    "action": "; ".join(_describe(d) for d in res.denials),
-                    "instruction": "Tell the user in one sentence what it wants to do and ask "
-                                   "yes or no. After they answer, call confirm_pending.",
-                })
-                return
-            state["pending"] = None
-            await params.result_callback(
-                {"status": "error" if res.is_error else "done", "result": res.text}
-            )
-        finally:
-            state["running"] = False
-
-    async def delegate(params, task: str):
-        """Hand a real task (files, shell, web, code) to the backend agent and return its answer. Use for anything beyond casual conversation.
+    # Async call (Pipecat: Function Calling > Per-Tool Options): barge-in must not cancel it, and the
+    # framework deadline must outlive the backend's own timeout.
+    @tool_options(cancel_on_interruption=False, timeout_secs=getattr(backend, "timeout", 300) + 30)
+    async def delegate(params: FunctionCallParams, task: str, directory: str = ""):
+        """Hand a real task (files, shell, web, code) to the backend agent and return its answer. Use for anything beyond casual conversation. If the answer is a question from Claude, ask the user and call this again with their reply to continue the same session.
 
         Args:
             task: A complete, self-contained description of what to do.
+            directory: The folder to work in, only if the user named one (for example ~/code/snake). Leave empty to use the private default workspace or to continue the current session.
         """
-        await _run(params, task)
-
-    async def confirm_pending(params):
-        """Run the action the user was just asked to approve. Call only after the user has answered the confirmation question."""
-        if not state["pending"]:
-            await params.result_callback({"status": "nothing_pending"})
+        if state["running"]:
+            await params.result_callback({
+                "status": "busy",
+                "instruction": "Tell the user you are still working on the previous task."})
             return
-        if state["running"]:  # keep the pending approval; don't consume it while busy
-            await _busy(params)
-            return
-        if _user_turns(params) <= state["pending"][2]:
-            # The user has not spoken since the question: words in the original request are not an answer.
+        state["running"] = True
+        try:
+            new_sid = str(uuid.uuid4())
+            try:
+                if directory and directory.strip():
+                    wd = resolve_workdir(directory, task, new_sid, workspace_root, home)
+                    resume = state["session"] is not None and state["cwd"] == str(wd)
+                    sid = state["session"] if resume else new_sid
+                elif state["session"]:
+                    resume, sid, wd = True, state["session"], Path(state["cwd"])
+                else:
+                    resume, sid = False, new_sid
+                    wd = resolve_workdir("", task, sid, workspace_root, home)
+            except (ValueError, OSError) as e:
+                await params.result_callback({"status": "error", "result": str(e)})
+                return
+            state["session"], state["cwd"] = sid, str(wd)
+            registry.upsert_session(sid, origin="delegated", mode="headless", state="running", cwd=str(wd))
+            task_id = registry.create_task(sid, task)
+            # Intermediate result (documented: is_final=False). run_llm=True on it is not in the docs
+            # (source honours it): without it Gemini calls the tool and says nothing, so the user hears silence.
             await params.result_callback(
-                {"status": "unclear", "instruction": "Ask the user yes or no first."}
-            )
-            return
-        verdict = classify(last_user_text(params.context.get_messages()))
-        if verdict == "unclear":
-            await params.result_callback(
-                {"status": "unclear", "instruction": "Ask the user to answer yes or no."}
-            )
-            return
-        task, denials, _ = state["pending"]
-        state["pending"] = None
-        if verdict == "no":
-            await params.result_callback({"status": "cancelled"})
-            return
-        approved = "; ".join(_describe(d) for d in denials)
-        await _run(params, f"The user approved exactly: {approved}. Retry: {task}", _allow_rules(denials))
+                {"status": "started", "instruction": "In one short sentence tell the user you've "
+                 "started and where; you will be told when it's done."},
+                properties=FunctionCallResultProperties(run_llm=True, is_final=False))
+            settings = settings_for(sid)
+            try:
+                res = await backend.run(task, session_id=sid, resume=resume, settings=settings, cwd=str(wd))
+            except Exception as e:  # a background call that never reports back would hang forever
+                logger.error(f"backend failed: {e!r}")
+                res = BackendResult(text="The task failed to run.", is_error=True)
+            finally:
+                if settings:  # holds the hook token: do not leave it lying around
+                    Path(settings).unlink(missing_ok=True)
+                if on_finish:  # a run that ended can no longer use an answer
+                    on_finish(sid)
+            status = "error" if res.is_error else "done"
+            registry.finish_task(task_id, status, res.text[:500])
+            registry.set_state(sid, "idle")
+            await params.result_callback({"status": status, "result": res.text})
+        finally:
+            state["running"] = False
 
-    return [delegate, confirm_pending]
+    return [delegate]
