@@ -1,22 +1,18 @@
 """Voice agent: Parakeet (local) -> Gemini Flash -> Kokoro (local). Run: uv run bot.py"""
 
-import asyncio
-import os
-from collections.abc import AsyncGenerator
+import logging
 from pathlib import Path
 
-import numpy as np
-import sherpa_onnx
 from dotenv import load_dotenv
-import logging
-
 from loguru import logger
 
+from backend import ClaudeCodeBackend
+from config import load
+from delegate import make_tools
+from hooks import HookBridge, hide_hook_tokens, load_token, make_router, write_run_settings
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import Frame, TranscriptionFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -25,22 +21,15 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.run import app
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from backend import ClaudeCodeBackend
-from config import load
-from delegate import make_tools
-from hooks import HookBridge, hide_hook_tokens, load_token, make_router, write_run_settings
-from pipecat.services.google.llm import GoogleLLMService
 from pipecat.services.kokoro.tts import KokoroTTSService
-from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transports.base_transport import TransportParams
-from pipecat.utils.time import time_now_iso8601
+from pipecat.workers.runner import WorkerRunner
 from registry import Registry
 from relay import Relay, make_bridge_tools, start_session
+from services import ParakeetSTTService, build_llm
 
 load_dotenv()
 
-PARAKEET_DIR = Path.home() / ".local/share/parakeet-dictation/models/desktop"
 KOKORO_DIR = Path.home() / "kokoro"
 
 cfg = load()
@@ -50,7 +39,9 @@ registry.expire_open()  # questions left open by a previous run can no longer be
 relay = Relay(registry)
 bridge = HookBridge(registry, relay, cfg.permission_timeout)
 HOOK_TOKEN = load_token(DATA / "hook-token")
-app.include_router(make_router(bridge, HOOK_TOKEN))  # hooks share the runner's app and port
+# Documented extension point (Running Bots Locally > Adding your own routes): the runner exports
+# its FastAPI app, so hooks share the voice page's process, event loop and port.
+app.include_router(make_router(bridge, HOOK_TOKEN))
 logging.getLogger("uvicorn.access").addFilter(hide_hook_tokens)  # the token is in the URL
 
 SYSTEM_PROMPT = (
@@ -67,52 +58,6 @@ SYSTEM_PROMPT = (
     "Never claim a task is done unless a tool result says done."
 )
 
-
-def build_llm(cfg):
-    key = os.environ.get(cfg.api_key_env, "ollama")
-    if cfg.provider == "gemini":
-        return GoogleLLMService(api_key=key, model=cfg.model)
-    base = cfg.base_url or ("http://localhost:11434/v1" if cfg.provider == "ollama" else None)
-    return OpenAILLMService(api_key=key, model=cfg.model, base_url=base)
-
-
-class ParakeetSTTService(SegmentedSTTService):
-    """Parakeet TDT 0.6B v3 via sherpa-onnx; transcribes each VAD segment."""
-
-    # ponytail: offline model, transcribes after VAD stop; swap for the streaming
-    # cache-aware model if STT latency dominates.
-    wants_wav_segments = False
-
-    def __init__(self, **kwargs):
-        super().__init__(sample_rate=16000, **kwargs)
-        self._rec = sherpa_onnx.OfflineRecognizer.from_transducer(
-            encoder=str(PARAKEET_DIR / "encoder.int8.onnx"),
-            decoder=str(PARAKEET_DIR / "decoder.int8.onnx"),
-            joiner=str(PARAKEET_DIR / "joiner.int8.onnx"),
-            tokens=str(PARAKEET_DIR / "tokens.txt"),
-            num_threads=4,
-            model_type="nemo_transducer",
-        )
-
-    def can_generate_metrics(self) -> bool:
-        return True
-
-    def _decode(self, pcm: bytes) -> str:
-        audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
-        stream = self._rec.create_stream()
-        stream.accept_waveform(16000, audio)
-        self._rec.decode_stream(stream)
-        return stream.result.text.strip()
-
-    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
-        await self.start_processing_metrics()
-        text = await asyncio.to_thread(self._decode, audio)
-        await self.stop_processing_metrics()
-        if text:
-            logger.info(f"User: {text}")
-            yield TranscriptionFrame(text, self._user_id, time_now_iso8601())
-
-
 transport_params = {
     "webrtc": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
 }
@@ -123,16 +68,14 @@ async def bot(runner_args: RunnerArguments):
 
     stt = ParakeetSTTService()
     backend = ClaudeCodeBackend(cwd=cfg.backend_cwd, timeout=cfg.backend_timeout)
-    llm = build_llm(cfg)
+    llm = build_llm(cfg, SYSTEM_PROMPT)
     tools = []
     if backend.available():
         settings_for = lambda sid: write_run_settings(DATA / "runs", sid, HOOK_TOKEN, cfg.hook_port)
+        # Tools declare their own options with @tool_options; LLMContext(tools=...) is the registration.
         tools = [*make_tools(backend, registry, settings_for, on_finish=bridge.expire_session,
                              workspace_root=Path(cfg.workspace_dir).expanduser()),
                  *make_bridge_tools(bridge, relay, registry, backend)]
-        for t in tools:
-            # Spec: barge-in cancels speech, not the task. (Default True would cancel the handler.)
-            llm.register_direct_function(t, cancel_on_interruption=False)
     else:
         logger.warning("claude CLI not found; running front-model-only")
     tts = KokoroTTSService(
@@ -141,31 +84,54 @@ async def bot(runner_args: RunnerArguments):
         settings=KokoroTTSService.Settings(voice="af_heart"),
     )
 
-    context = LLMContext([{"role": "system", "content": SYSTEM_PROMPT}], tools=tools)
-    user_agg, assistant_agg = LLMContextAggregatorPair(
+    context = LLMContext(tools=tools)
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        # Default turn stop strategy is Smart Turn v3 (local).
+        # Defaults: Smart Turn v3 stop strategy (Speech Input & Turn Detection > Best Practices).
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
     )
 
     pipeline = Pipeline(
-        [transport.input(), stt, user_agg, llm, tts, transport.output(), assistant_agg]
+        [transport.input(), stt, user_aggregator, llm, tts, transport.output(), assistant_aggregator]
     )
-    task = PipelineTask(
+    worker = PipelineWorker(
         pipeline,
         params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
     )
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+    await runner.add_workers(worker)
+
+    # Documented turn events (Turn Events): the relay speaks a pending Claude question only when
+    # neither side is talking.
+    @user_aggregator.event_handler("on_user_turn_started")
+    async def on_user_turn_started(aggregator, strategy):
+        relay.user_turn(True)
+
+    @user_aggregator.event_handler("on_user_turn_stopped")
+    async def on_user_turn_stopped(aggregator, strategy, message):
+        relay.user_turn(False)
+
+    @assistant_aggregator.event_handler("on_assistant_turn_started")
+    async def on_assistant_turn_started(aggregator, *args):
+        relay.bot_turn(True)
+
+    @assistant_aggregator.event_handler("on_assistant_turn_stopped")
+    async def on_assistant_turn_stopped(aggregator, *args):
+        relay.bot_turn(False)
 
     @transport.event_handler("on_client_connected")
-    async def on_connected(transport, client):
-        await start_session(relay, task, context)  # attaches the relay first, then greets
+    async def on_client_connected(transport, client):
+        await start_session(relay, worker, context)  # attaches the relay first, then greets
 
     @transport.event_handler("on_client_disconnected")
-    async def on_disconnected(transport, client):
-        relay.detach()
-        await task.cancel()
+    async def on_client_disconnected(transport, client):
+        await runner.cancel()
 
-    await PipelineRunner(handle_sigint=runner_args.handle_sigint).run(task)
+    @worker.event_handler("on_pipeline_finished")
+    async def on_pipeline_finished(worker, frame):
+        relay.detach()  # runs for graceful and cancelled shutdowns alike
+
+    await runner.run()
 
 
 if __name__ == "__main__":
