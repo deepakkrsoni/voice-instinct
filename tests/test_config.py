@@ -11,3 +11,8 @@ def test_overrides(tmp_path):
     f.write_text('provider = "ollama"\nmodel = "qwen3:8b"\n')
     c = load(f)
     assert (c.provider, c.model) == ("ollama", "qwen3:8b")
+
+
+def test_bridge_defaults():
+    c = load("/nonexistent.toml")
+    assert (c.permission_timeout, c.hook_port, c.data_dir) == (90, 7860, "~/.voice-instinct")

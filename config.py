@@ -11,6 +11,9 @@ class Config:
     api_key_env: str = "GEMINI_API_KEY"
     backend_cwd: str = str(Path.home())
     backend_timeout: float = 120
+    data_dir: str = "~/.voice-instinct"
+    permission_timeout: float = 90
+    hook_port: int = 7860
 
 
 def load(path="config.toml") -> Config:

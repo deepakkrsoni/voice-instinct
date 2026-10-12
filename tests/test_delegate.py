@@ -3,171 +3,104 @@ from types import SimpleNamespace
 
 from backend import BackendResult
 from delegate import make_tools
-
-DENIAL = {"tool_name": "Bash", "tool_input": {"command": "touch /tmp/x"}}
+from registry import Registry
 
 
 class FakeBackend:
     def __init__(self, results):
         self.results, self.calls = list(results), []
 
-    async def run(self, task, session_id=None, extra_allowed=()):
-        self.calls.append((task, session_id, tuple(extra_allowed)))
+    async def run(self, task, session_id=None, resume=False, settings=None, extra_allowed=()):
+        self.calls.append({"task": task, "sid": session_id, "resume": resume, "settings": settings})
         return self.results.pop(0)
 
 
-def make_params(*user_texts):
-    props = []
-    out = []
+def make_params():
+    out, props = [], []
 
     async def cb(r, properties=None, **kw):
         out.append(r)
         props.append(properties)
 
-    msgs = [{"role": "user", "content": t} for t in user_texts]
-    ctx = SimpleNamespace(get_messages=lambda: msgs)
-    return SimpleNamespace(result_callback=cb, context=ctx, props=props), out
+    return SimpleNamespace(result_callback=cb, props=props), out
 
 
-def run(coro):
-    return asyncio.run(coro)
+def setup(results):
+    reg = Registry()
+    b = FakeBackend(results)
+    (delegate,) = make_tools(b, reg, lambda sid: f"/settings/{sid}.json")
+    return reg, b, delegate
 
 
-def test_delegate_returns_result_and_keeps_session():
-    b = FakeBackend([BackendResult("big.iso", "s1"), BackendResult("done", "s1")])
-    delegate, _ = make_tools(b)
+def run(c):
+    return asyncio.run(c)
+
+
+def test_delegate_acknowledges_then_reports_and_records_everything():
+    reg, b, delegate = setup([BackendResult("big.iso", "ignored")])
     p, out = make_params()
     run(delegate(p, "biggest file?"))
-    assert out[-1] == {"status": "done", "result": "big.iso"}
-    run(delegate(p, "and the second?"))
-    assert b.calls[1][1] == "s1"
+    assert [o["status"] for o in out] == ["started", "done"] and out[-1]["result"] == "big.iso"
+    assert p.props[0].is_final is False and p.props[0].run_llm is False and p.props[1] is None
+    call = b.calls[0]
+    assert call["resume"] is False and call["settings"] == f"/settings/{call['sid']}.json"
+    s = reg.get_session(call["sid"])
+    assert (s["origin"], s["mode"], s["state"]) == ("delegated", "headless", "idle")
+    assert reg.list_sessions()[0]["last_task"] == "biggest file?"
 
 
-def test_denial_requires_confirmation_and_runs_nothing_more():
-    b = FakeBackend([BackendResult("blocked", "s1", [DENIAL])])
-    delegate, _ = make_tools(b)
-    p, out = make_params()
-    run(delegate(p, "make a file"))
-    assert out[-1]["status"] == "needs_confirmation" and "touch /tmp/x" in out[-1]["action"]
-    assert len(b.calls) == 1
-
-
-def test_confirm_with_nothing_pending_runs_nothing():
-    b = FakeBackend([])
-    _, confirm = make_tools(b)
-    p, out = make_params("yes")
-    run(confirm(p))
-    assert out[-1]["status"] == "nothing_pending" and b.calls == []
-
-
-def test_confirm_yes_reruns_with_denied_tool_allowed():
-    b = FakeBackend([BackendResult("blocked", "s1", [DENIAL]), BackendResult("created", "s1")])
-    delegate, confirm = make_tools(b)
-    run(delegate(make_params("make a file")[0], "make a file"))
-    p, out = make_params("make a file", "yeah go ahead")
-    run(confirm(p))
-    assert out[-1] == {"status": "done", "result": "created"}
-    assert b.calls[1][2] == ("Bash(touch /tmp/x)",)
-    assert "touch /tmp/x" in b.calls[1][0]  # retry names the exact approved command
-
-
-def test_confirm_no_cancels_and_clears_pending():
-    b = FakeBackend([BackendResult("blocked", "s1", [DENIAL])])
-    delegate, confirm = make_tools(b)
-    run(delegate(make_params("make a file")[0], "make a file"))
-    p, out = make_params("make a file", "no don't")
-    run(confirm(p))
-    assert out[-1]["status"] == "cancelled"
-    p2, out2 = make_params("make a file", "no don't", "yes")  # stale yes after a no must not resurrect the task
-    run(confirm(p2))
-    assert out2[-1]["status"] == "nothing_pending" and len(b.calls) == 1
-
-
-def test_confirm_unclear_keeps_pending():
-    b = FakeBackend([BackendResult("blocked", "s1", [DENIAL]), BackendResult("created", "s1")])
-    delegate, confirm = make_tools(b)
-    run(delegate(make_params("make a file")[0], "make a file"))
-    p, out = make_params("make a file", "hmm what would it do")
-    run(confirm(p))
-    assert out[-1]["status"] == "unclear"
-    p2, out2 = make_params("make a file", "hmm what would it do", "sure")
-    run(confirm(p2))
-    assert out2[-1]["status"] == "done"
-
-
-def test_same_turn_confirm_cannot_approve():
-    # The "yes" in the request that started the task is not an answer to the question.
-    b = FakeBackend([BackendResult("blocked", "s1", [DENIAL]), BackendResult("created", "s1")])
-    delegate, confirm = make_tools(b)
-    run(delegate(make_params("okay make a file")[0], "make a file"))
-    p, out = make_params("okay make a file")  # user has not spoken since the question
-    run(confirm(p))
-    assert out[-1]["status"] == "unclear" and len(b.calls) == 1
-    p2, out2 = make_params("okay make a file", "yes please")  # a real answer still works
-    run(confirm(p2))
-    assert out2[-1]["status"] == "done"
-
-
-def test_denial_without_tool_name_does_not_crash():
-    b = FakeBackend([BackendResult("blocked", "s1", [{"tool_input": {}}]), BackendResult("ok", "s1")])
-    delegate, confirm = make_tools(b)
-    run(delegate(make_params("x")[0], "x"))
-    p, out = make_params("x", "yes")
-    run(confirm(p))
-    assert out[-1]["status"] in ("done", "error")
-
-
-def test_delegate_acknowledges_immediately_then_reports():
-    b = FakeBackend([BackendResult("big.iso", "s1")])
-    delegate, _ = make_tools(b)
-    p, out = make_params("biggest file?")
-    run(delegate(p, "biggest file?"))
-    assert [o["status"] for o in out] == ["started", "done"]
-    assert p.props[0].is_final is False and p.props[0].run_llm is False  # ack must not re-run the LLM
-    assert p.props[1] is None  # final result uses the defaults
+def test_follow_up_resumes_the_same_session():
+    reg, b, delegate = setup([BackendResult("Which folder?"), BackendResult("done")])
+    run(delegate(make_params()[0], "tidy up"))
+    run(delegate(make_params()[0], "the downloads one"))
+    assert b.calls[1]["sid"] == b.calls[0]["sid"] and b.calls[1]["resume"] is True
+    assert len(reg.list_sessions()) == 1
 
 
 class GatedBackend:
     def __init__(self, gate):
         self.gate, self.calls = gate, []
 
-    async def run(self, task, session_id=None, extra_allowed=()):
+    async def run(self, task, session_id=None, resume=False, settings=None, extra_allowed=()):
         self.calls.append(task)
         await self.gate.wait()
-        return BackendResult("done it", "s1")
+        return BackendResult("done it")
 
 
 def test_second_task_while_running_is_busy_then_allowed_after():
     async def go():
         gate = asyncio.Event()
         b = GatedBackend(gate)
-        delegate, _ = make_tools(b)
-        p1, out1 = make_params("a")
-        p2, out2 = make_params("a", "b")
+        (delegate,) = make_tools(b, Registry(), lambda sid: None)
+        p1, out1 = make_params()
+        p2, out2 = make_params()
         t = asyncio.create_task(delegate(p1, "first"))
         await asyncio.sleep(0)
         await delegate(p2, "second")
         gate.set()
         await t
-        p3, out3 = make_params("a", "b", "c")
+        p3, out3 = make_params()
         await delegate(p3, "third")
         return b, out1, out2, out3
 
-    b, out1, out2, out3 = run(asyncio.wait_for(go(), 3))  # RED must fail, not hang
+    b, out1, out2, out3 = run(asyncio.wait_for(go(), 3))
     assert [o["status"] for o in out2] == ["busy"] and b.calls == ["first", "third"]
     assert out1[-1]["status"] == "done" and out3[-1]["status"] == "done"
 
 
 class RaisingBackend:
-    async def run(self, task, session_id=None, extra_allowed=()):
+    async def run(self, *a, **k):
         raise OSError("spawn failed")
 
 
-def test_backend_crash_still_reports_error_and_frees_the_slot():
-    delegate, _ = make_tools(RaisingBackend())
-    p, out = make_params("x")
-    run(delegate(p, "x"))  # must not raise: a background call that never reports hangs forever
+def test_backend_crash_reports_error_frees_the_slot_and_marks_task_failed():
+    reg = Registry()
+    (delegate,) = make_tools(RaisingBackend(), reg, lambda sid: None)
+    p, out = make_params()
+    run(delegate(p, "x"))
     assert out[-1]["status"] == "error"
-    p2, out2 = make_params("x", "y")
+    p2, out2 = make_params()
     run(delegate(p2, "y"))
-    assert out2[-1]["status"] == "error"  # not "busy": the slot was released
+    assert out2[-1]["status"] == "error"  # not "busy"
+    statuses = [r[0] for r in reg.db.execute("SELECT status FROM tasks ORDER BY id")]
+    assert statuses == ["error", "error"]
