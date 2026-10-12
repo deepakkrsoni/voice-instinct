@@ -51,9 +51,46 @@ class Relay:
         self._queue: list[int] = []
         self._current = None
         self._bg: set = set()
+        # Delivery waits for a quiet moment, from Pipecat's documented turn events
+        # (on_user_turn_started/stopped, on_assistant_turn_started/stopped). The docs are silent on
+        # gating injected messages, so this is ours; quiet_grace stops a missed event from
+        # swallowing a question (its hook would time out into a denial).
+        self.quiet_grace = 15.0
+        self._user_active = self._bot_active = self._force = False
+        self._grace = None
 
     def attach(self, task, context):
         self._task, self._context = task, context
+        self._user_active = self._bot_active = self._force = False  # a new session starts quiet
+
+    def user_turn(self, active: bool):
+        self._user_active = active
+        self._maybe_kick()
+
+    def bot_turn(self, active: bool):
+        self._bot_active = active
+        self._maybe_kick()
+
+    def _quiet(self):
+        return self._force or not (self._user_active or self._bot_active)
+
+    def _maybe_kick(self):
+        if self._quiet() and self._queue:
+            self._kick()
+
+    def _kick(self):
+        t = asyncio.get_running_loop().create_task(self._pump())
+        self._bg.add(t)
+        t.add_done_callback(self._bg.discard)
+
+    def _arm_grace(self):
+        if self._grace is None:
+            self._grace = asyncio.get_running_loop().call_later(self.quiet_grace, self._grace_expired)
+
+    def _grace_expired(self):
+        self._grace = None
+        self._force = True
+        self._kick()
 
     async def attach_and_pump(self, task, context):
         self.attach(task, context)
@@ -63,6 +100,9 @@ class Relay:
         await self._pump()
 
     def detach(self):
+        if self._grace is not None:
+            self._grace.cancel()
+            self._grace = None
         self._task = self._context = None
         self._current = None  # open questions stay in the DB and are re-raised on the next attach
 
@@ -75,12 +115,17 @@ class Relay:
         self._queue = [q for q in self._queue if q != qid]
         if self._current == qid:
             self._current = None
-        t = asyncio.get_running_loop().create_task(self._pump())
-        self._bg.add(t)
-        t.add_done_callback(self._bg.discard)
+        self._kick()
 
     async def _pump(self):
         while self._task is not None and self._current is None and self._queue:
+            if not self._quiet():
+                self._arm_grace()  # wait for the next turn-stopped event, or the grace period
+                return
+            if self._grace is not None:
+                self._grace.cancel()
+                self._grace = None
+            self._force = False
             qid = self._queue.pop(0)
             q = self.reg.get_question(qid)
             if not q or q["status"] != "open":

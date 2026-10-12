@@ -302,3 +302,78 @@ def test_a_failing_greeting_must_not_leave_the_relay_detached():
     relay, task, q = run(go())
     assert relay._task is task
     assert any(f"question_id={q})" in m.get("content", "") for m in task.ctx.msgs)  # still spoken
+
+
+def _raise_one(relay, reg):
+    reg.upsert_session("s1", name="refactor")
+    return reg.add_question("s1", "permission", "ls", "Bash", {"command": "ls"})
+
+
+def test_question_waits_for_the_bot_to_finish_speaking():
+    async def go():
+        reg, relay, task, ctx, bridge = setup("hi")
+        q = _raise_one(relay, reg)
+        relay.bot_turn(True)  # on_assistant_turn_started
+        await relay.raise_question(q)
+        waiting = len(task.frames)
+        relay.bot_turn(False)  # on_assistant_turn_stopped
+        await asyncio.sleep(0.01)
+        return waiting, len(task.frames)
+
+    assert run(go()) == (0, 1)
+
+
+def test_question_waits_for_the_user_to_finish_speaking():
+    async def go():
+        reg, relay, task, ctx, bridge = setup("hi")
+        q = _raise_one(relay, reg)
+        relay.user_turn(True)  # on_user_turn_started
+        await relay.raise_question(q)
+        waiting = len(task.frames)
+        relay.user_turn(False)  # on_user_turn_stopped
+        await asyncio.sleep(0.01)
+        return waiting, len(task.frames)
+
+    assert run(go()) == (0, 1)
+
+
+def test_question_needs_both_sides_quiet():
+    async def go():
+        reg, relay, task, ctx, bridge = setup("hi")
+        q = _raise_one(relay, reg)
+        relay.user_turn(True)
+        relay.bot_turn(True)
+        await relay.raise_question(q)
+        relay.user_turn(False)
+        await asyncio.sleep(0.01)
+        still = len(task.frames)
+        relay.bot_turn(False)
+        await asyncio.sleep(0.01)
+        return still, len(task.frames)
+
+    assert run(go()) == (0, 1)
+
+
+def test_a_stuck_speaking_flag_cannot_swallow_a_question_forever():
+    # If a turn-stopped event is ever missed, the question must still be spoken after the grace
+    # period, or its hook times out into a denial (the failure seen in the first voice demo).
+    async def go():
+        reg, relay, task, ctx, bridge = setup("hi")
+        relay.quiet_grace = 0.05
+        q = _raise_one(relay, reg)
+        relay.bot_turn(True)  # ...and the stop event never arrives
+        await relay.raise_question(q)
+        await asyncio.sleep(0.2)
+        return len(task.frames)
+
+    assert run(go()) == 1
+
+
+def test_a_new_session_starts_with_both_sides_quiet():
+    async def go():
+        reg, relay, task, ctx, bridge = setup("hi")
+        relay.bot_turn(True)
+        relay.attach(FakeTask(), ctx)  # reconnect: flags from the old session must not linger
+        return relay._bot_active, relay._user_active
+
+    assert run(go()) == (False, False)
