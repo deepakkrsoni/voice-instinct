@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 import sqlite3
 import time
 from pathlib import Path
@@ -34,7 +35,9 @@ class Registry:
     def __init__(self, path=":memory:", clock=time.time):
         self.clock = clock
         if path != ":memory:":
-            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            parent = Path(path).parent
+            parent.mkdir(parents=True, exist_ok=True)
+            os.chmod(parent, 0o700)  # events hold every hook payload: commands, file contents
         # One event loop writes; check_same_thread off so tests can read from another thread.
         self.db = sqlite3.connect(str(path), isolation_level=None, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
@@ -42,6 +45,8 @@ class Registry:
         if path != ":memory:":
             self.db.execute("PRAGMA journal_mode=WAL")
         self.db.executescript(SCHEMA)
+        if path != ":memory:":
+            os.chmod(path, 0o600)
 
     def _one(self, sql, args=()):
         row = self.db.execute(sql, args).fetchone()

@@ -74,3 +74,13 @@ def test_tasks_link_to_sessions_and_list_shows_counts():
     r.set_state("s1", "ended")
     assert r.list_sessions(active_only=True) == []
     assert len(r.list_sessions()) == 1
+
+
+def test_database_and_its_directory_are_private(tmp_path):
+    import os
+    import stat
+
+    d = tmp_path / "data"
+    Registry(d / "harness.db")
+    assert stat.S_IMODE(os.stat(d).st_mode) == 0o700
+    assert stat.S_IMODE(os.stat(d / "harness.db").st_mode) == 0o600

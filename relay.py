@@ -15,10 +15,21 @@ def _quote_safe(text):
 
 
 def _user_spoke_after_question(msgs, qid):
-    marker = f"question_id={qid})"
+    """True only if the question message is in the context, the assistant then said something
+    (so the user was actually asked), and the user replied after that.
+
+    The question message is matched on its fixed ending, which untrusted text can never reach,
+    so Claude's own output cannot forge the marker of a later question.
+    """
+    tail = f"answer_question(question_id={qid})."
     idx = next((i for i in range(len(msgs) - 1, -1, -1)
-                if msgs[i].get("role") == "developer" and marker in str(msgs[i].get("content"))), None)
-    return idx is not None and any(m.get("role") == "user" for m in msgs[idx + 1:])
+                if msgs[i].get("role") == "developer"
+                and str(msgs[i].get("content", "")).rstrip().endswith(tail)), None)
+    if idx is None:
+        return False
+    asked = next((i for i in range(idx + 1, len(msgs))
+                  if msgs[i].get("role") == "assistant" and msgs[i].get("content")), None)
+    return asked is not None and any(m.get("role") == "user" for m in msgs[asked + 1:])
 
 
 def frame_question(q, session):

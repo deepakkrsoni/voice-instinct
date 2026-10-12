@@ -32,15 +32,23 @@ Paths are hardcoded at the top of `bot.py` for now.
 | `model` | model id, default `gemini-3.8-flash` |
 | `base_url` | OpenAI-compatible endpoint (Ollama defaults to `localhost:11434`) |
 | `api_key_env` | env var holding the key |
-| `backend_cwd`, `backend_timeout` | where the backend agent works (default home) and its timeout (120 s) |
+| `backend_cwd`, `backend_timeout` | where the backend agent works (default home) and its timeout (300 s; keep it well above `permission_timeout`, 90 s) |
 
 ## Safety
 
-The backend starts read-only (`Read/Glob/Grep` and a few `Bash(ls|du|find|stat|wc|cat)` commands).
-Anything else is blocked, the assistant tells you what it wants to do and asks yes/no, and only an
-explicit spoken "yes" (decided by code on your actual words, not by the LLM) re-runs it. Approving
-allows only the exact blocked command for that one retry. A "yes" only counts if you spoke after the
-question was asked. `find` is not allowed read-only because it can delete.
+The backend pre-approves only read-only tools (`Read`, `Glob`, `Grep`, and `Bash` for `ls`, `du`,
+`stat`, `wc`, `cat`). `find` is left out because it can delete. Anything else makes Claude Code ask
+permission through a hook; the assistant tells you what it wants to do and asks yes or no.
+
+- The answer is decided by code from your own words, never by the LLM, and an allow applies to that
+  single tool call.
+- A "yes" counts only if the question is in the conversation, the assistant actually asked it, and
+  you replied after that. Claude's own text cannot forge that: it is shown to the LLM as quoted data.
+- `backend_cwd` defaults to your home directory, and Claude Code's read-only handling treats paths
+  inside it as in scope. Point it at a narrower directory if you want a tighter boundary.
+- The hook server listens on localhost only and requires a random token. The token, the per-run
+  settings files and the database are private to your user (mode 600/700). The database stores every
+  hook payload, including commands and file contents Claude proposed to write.
 
 Using a subscription CLI this way depends on the vendor's terms; check them before relying on it.
 
@@ -57,7 +65,3 @@ running, Claude is unaffected.
 
 `uv run pytest` runs the unit tests. `uv run pytest -m claude` runs the real-CLI integration tests
 (allow, deny, server-down), which need the `claude` CLI logged in.
-
-
-
-`uv run pytest`
