@@ -1,16 +1,57 @@
 # voice-instinct
 
-A voice-first assistant that runs on your own machine. You talk to it; a fast "front" model handles
-the conversation and hands real tasks (files, shell, web, code) to a backend agent, then speaks
-the result. Not affiliated with Instinct.
+A voice-first personal agent that runs on your own machine and handles everyday errands, in the
+spirit of [Instinct](https://techcrunch.com/2026/09/28/viral-ai-agent-instinct-raises-1b-series-c-at-a-10b-valuation/)
+(the texting agent): you talk to it, it does the legwork, and it asks you, by voice, only when it
+needs a decision, a choice or a login code. Local and private, open source, bring your own model.
+Not affiliated with Instinct.
+
+> **Status: early prototype.** The voice loop, the delegated-task bridge, the sandboxed autonomy and
+> the approval-by-voice flow exist. The errand capabilities below are mostly not built yet; the
+> roadmap shows what is next and where help is welcome.
+
+## What it does today
+
+- Talk to it in the browser; fast local speech-to-text (Parakeet) and text-to-speech (Kokoro) around
+  a model of your choice (Gemini by default; any OpenAI-compatible endpoint or Ollama).
+- Hands real work to your own logged-in `claude` CLI as a tracked background task, runs it
+  autonomously in a sandbox, and speaks the result.
+- When the agent needs a go-ahead or an answer, it asks you aloud and continues in the same run.
+- Scope is **errands only** (research, bookings, shopping, bills, subscriptions, reminders, calling
+  businesses). It declines coding and general computer tasks. See
+  [docs/superpowers/specs/2026-10-13-instinct-scope.md](docs/superpowers/specs/2026-10-13-instinct-scope.md).
+
+## Roadmap
+
+Each item is a GitHub issue. Order follows the scope spec.
+
+| Step | Capability | Issue |
+|---|---|---|
+| 1 | Research and comparison shopping, spoken results | [#2](https://github.com/deepakkrsoni/voice-instinct/issues/2) |
+| 1 | Memory: remember, forget, recall | [#3](https://github.com/deepakkrsoni/voice-instinct/issues/3) |
+| 1 | Reminders and proactive follow-ups | [#4](https://github.com/deepakkrsoni/voice-instinct/issues/4) |
+| 1 | Text channel: Telegram first, WhatsApp later | [#5](https://github.com/deepakkrsoni/voice-instinct/issues/5) |
+| 2 | Browser bookings: propose, then book on your go-ahead | [#6](https://github.com/deepakkrsoni/voice-instinct/issues/6) |
+| 3 | Payments with code-enforced spend limits and an action log | [#7](https://github.com/deepakkrsoni/voice-instinct/issues/7) |
+| 4 | Concierge phone calls to businesses | [#8](https://github.com/deepakkrsoni/voice-instinct/issues/8) |
+| 5 | Cancel subscriptions by voice | [#9](https://github.com/deepakkrsoni/voice-instinct/issues/9) |
+| later | Trusted-person network (agent-to-agent) | [#10](https://github.com/deepakkrsoni/voice-instinct/issues/10) |
+| meta | Choose a license | [#11](https://github.com/deepakkrsoni/voice-instinct/issues/11) |
+
+Want to help? Read [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## How it works
 
 ```
 mic -> Parakeet STT -> Smart Turn v3 -> front LLM -> Kokoro TTS -> speaker
                                           |  ^
-                                 delegate(task)  result
+                                 delegate(task)  result / questions
                                           v  |
-                              Claude Code CLI (your login)
+                  Claude Code CLI (your login) in a sandboxed task folder
+                          hooks -> local relay -> asks you by voice
 ```
+
+Built on [Pipecat](https://docs.pipecat.ai) 1.12. The design documents are in `docs/superpowers/`.
 
 ## Run
 
@@ -22,7 +63,7 @@ uv run bot.py                         # then open http://localhost:7860/client
 
 Needs: Parakeet TDT 0.6B v3 (sherpa-onnx int8) in `~/.local/share/parakeet-dictation/models/desktop/`,
 Kokoro (`kokoro-v1.0.onnx`, `voices-v1.0.bin`) in `~/kokoro/`, and the `claude` CLI logged in.
-Paths are hardcoded at the top of `bot.py` for now.
+Model paths are hardcoded for now (`services.py` and `bot.py`); making them configurable is a good first contribution.
 
 ## Config (`config.toml`)
 
@@ -77,4 +118,5 @@ running, Claude is unaffected.
 ## Tests
 
 `uv run pytest` runs the unit tests. `uv run pytest -m claude` runs the real-CLI integration tests
-(allow, deny, server-down), which need the `claude` CLI logged in.
+(permission hook allow/deny, fail-open, sandbox and secret rules), which need the `claude` CLI logged in
+and use your subscription.
