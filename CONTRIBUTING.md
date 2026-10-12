@@ -5,7 +5,7 @@ machine. The project is early, so a small, well-tested change is worth more than
 
 ## What to work on
 
-- Pick an issue from the [roadmap](README.md#roadmap). Issues labelled `needs-design` have open
+- Pick an [open issue](https://github.com/deepakkrsoni/voice-instinct/issues). Issues labelled `needs-design` have open
   questions: comment with your approach before building, so we agree on the design first.
 - Scope is **errands only** (research, bookings, shopping, bills, subscriptions, reminders, calling
   businesses). Coding assistants and general computer tasks are out of scope; see
@@ -44,7 +44,7 @@ fakes in `tests/` stand in for Pipecat and the CLI only at the edges.
   inside the quoted block in `relay.py`, never as instructions.
 - **Hooks fail open.** If this app is down, the user's Claude sessions must keep working.
 - **No money, messages or account changes without a code-enforced limit and an action log.** Do not
-  add a payment or send tool before the safeguards in the roadmap exist.
+  add a payment or send tool before the safeguards in issue #7 exist.
 - **No secrets in the repo, logs or settings files.** Tokens and databases are mode 600/700; check
   `git diff` before you commit.
 
