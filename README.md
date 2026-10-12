@@ -32,23 +32,36 @@ Paths are hardcoded at the top of `bot.py` for now.
 | `model` | model id, default `gemini-3.8-flash` |
 | `base_url` | OpenAI-compatible endpoint (Ollama defaults to `localhost:11434`) |
 | `api_key_env` | env var holding the key |
+| `permission_mode` | Claude Code mode for delegated runs (default `auto`) |
+| `workspace_dir` | default task folder (default `~/.voice-instinct/workspace`) |
 | `backend_cwd`, `backend_timeout` | where the backend agent works (default home) and its timeout (300 s; keep it well above `permission_timeout`, 90 s) |
 
-## Safety
+## Safety and autonomy
 
-The backend pre-approves only read-only tools (`Read`, `Glob`, `Grep`, and `Bash` for `ls`, `du`,
-`stat`, `wc`, `cat`). `find` is left out because it can delete. Anything else makes Claude Code ask
-permission through a hook; the assistant tells you what it wants to do and asks yes or no.
+Delegated tasks run autonomously, like a personal agent, inside a bounded box:
 
-- The answer is decided by code from your own words, never by the LLM, and an allow applies to that
-  single tool call.
-- A "yes" counts only if the question is in the conversation, the assistant actually asked it, and
-  you replied after that. Claude's own text cannot forge that: it is shown to the LLM as quoted data.
-- `backend_cwd` defaults to your home directory, and Claude Code's read-only handling treats paths
-  inside it as in scope. Point it at a narrower directory if you want a tighter boundary.
-- The hook server listens on localhost only and requires a random token. The token, the per-run
-  settings files and the database are private to your user (mode 600/700). The database stores every
-  hook payload, including commands and file contents Claude proposed to write.
+- **Claude Code `auto` mode** (`permission_mode` in `config.toml`): routine actions go ahead, and a
+  classifier blocks escalation and actions steered by hostile content.
+- **Claude Code's built-in sandbox** (needs `bubblewrap` and `socat`; it refuses to start without
+  them): shell commands run without prompts but can only write inside the task folder and reach
+  approved network domains. It fails closed and the agent cannot retry a command outside it.
+- **Secrets walled off** in both the sandbox and the file-tool permission rules: `~/.ssh`, `~/.aws`,
+  `~/.gnupg`, `~/.config/gh`, `~/.kube`, credential files, this app's `.env`, its token and database.
+  Deny rules hold in every permission mode.
+- **Each task gets its own folder**: the one you name (inside your home directory only) or a private
+  default workspace at `~/.voice-instinct/workspace/`.
+- **Anything that still needs a human reaches you by voice.** A permission request goes through a
+  hook; your spoken yes or no is decided by code from your own words, never by the LLM, and only if
+  the assistant actually asked you. A question or a login code request from the agent arrives as
+  its answer, and your reply resumes the same session.
+
+The sandbox covers shell commands only. File tools, web fetching and MCP/browser tools run outside
+it, which is why the secret deny rules exist and why browsing should use a dedicated profile.
+`backend_cwd` defaults to your home directory; point it at a narrower directory for a tighter boundary.
+
+The hook server listens on localhost only and requires a random token. The token, per-run settings
+files and the database are private to your user (mode 600/700). The database stores every hook
+payload, including commands and file contents Claude proposed to write.
 
 Using a subscription CLI this way depends on the vendor's terms; check them before relying on it.
 
