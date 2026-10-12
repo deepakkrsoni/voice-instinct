@@ -44,6 +44,20 @@ question was asked. `find` is not allowed read-only because it can delete.
 
 Using a subscription CLI this way depends on the vendor's terms; check them before relying on it.
 
+## Harness bridge
+
+Delegated tasks run as tracked Claude Code sessions. Claude's permission requests reach you by
+voice through a per-run hook (`--settings`, your global Claude settings are untouched): the
+assistant asks, your spoken yes or no (decided by code, never the LLM) unblocks that one call in
+the same run. Sessions, tasks, hook events and questions live in `~/.voice-instinct/harness.db`
+(SQLite). Ask "what's Claude working on?" to list them. Hooks fail open: if this app is not
+running, Claude is unaffected.
+
 ## Tests
+
+`uv run pytest` runs the unit tests. `uv run pytest -m claude` runs the real-CLI integration tests
+(allow, deny, server-down), which need the `claude` CLI logged in.
+
+
 
 `uv run pytest`

@@ -20,30 +20,45 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
+from pipecat.runner.run import app
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from backend import ClaudeCodeBackend
 from config import load
 from delegate import make_tools
+from hooks import HookBridge, load_token, make_router, write_run_settings
 from pipecat.services.google.llm import GoogleLLMService
 from pipecat.services.kokoro.tts import KokoroTTSService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transports.base_transport import TransportParams
 from pipecat.utils.time import time_now_iso8601
+from registry import Registry
+from relay import Relay, make_bridge_tools
 
 load_dotenv()
 
 PARAKEET_DIR = Path.home() / ".local/share/parakeet-dictation/models/desktop"
 KOKORO_DIR = Path.home() / "kokoro"
 
+cfg = load()
+DATA = Path(cfg.data_dir).expanduser()
+registry = Registry(DATA / "harness.db")
+registry.expire_open()  # questions left open by a previous run can no longer be answered
+relay = Relay(registry)
+bridge = HookBridge(registry, relay, cfg.permission_timeout)
+HOOK_TOKEN = load_token(DATA / "hook-token")
+app.include_router(make_router(bridge, HOOK_TOKEN))  # hooks share the runner's app and port
+
 SYSTEM_PROMPT = (
     "You are a voice assistant. Your replies are spoken aloud, so use short, "
     "plain sentences with no markdown, lists, or emoji. Keep answers to one to "
     "three sentences unless asked for more. For anything that needs files, the "
     "shell, the web, or code, call delegate(task) and say one short line like "
-    "'on it' first. When a result says needs_confirmation, tell the user what it "
-    "wants to do and ask yes or no, then call confirm_pending after they answer. "
+    "'on it' first. If a delegate result is a question from Claude, ask the user "
+    "and call delegate again with their reply. When you are told a Claude session "
+    "needs a decision, ask the user, then call answer_question after they answer. "
+    "Use list_sessions to answer what Claude is doing and stop_session to stop one. "
     "Never claim a task is done unless a tool result says done."
 )
 
@@ -102,12 +117,13 @@ async def bot(runner_args: RunnerArguments):
     transport = await create_transport(runner_args, transport_params)
 
     stt = ParakeetSTTService()
-    cfg = load()
     backend = ClaudeCodeBackend(cwd=cfg.backend_cwd, timeout=cfg.backend_timeout)
     llm = build_llm(cfg)
     tools = []
     if backend.available():
-        tools = make_tools(backend)
+        settings_for = lambda sid: write_run_settings(DATA / "runs", sid, HOOK_TOKEN, cfg.hook_port)
+        tools = [*make_tools(backend, registry, settings_for),
+                 *make_bridge_tools(bridge, relay, registry, backend)]
         for t in tools:
             # Spec: barge-in cancels speech, not the task. (Default True would cancel the handler.)
             llm.register_direct_function(t, cancel_on_interruption=False)
@@ -138,9 +154,11 @@ async def bot(runner_args: RunnerArguments):
     async def on_connected(transport, client):
         context.add_message({"role": "developer", "content": "Greet the user in one short sentence."})
         await task.queue_frames([user_agg.get_context_frame()])
+        await relay.attach_and_pump(task, context)  # raises any question waiting for the user
 
     @transport.event_handler("on_client_disconnected")
     async def on_disconnected(transport, client):
+        relay.detach()
         await task.cancel()
 
     await PipelineRunner(handle_sigint=runner_args.handle_sigint).run(task)
