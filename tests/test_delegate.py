@@ -158,3 +158,21 @@ def test_directory_outside_home_is_refused_without_starting_anything(tmp_path):
     p2, out2 = make_params()
     run(asyncio.wait_for(delegate(p2, "ok now", "~/fine"), 2))  # the slot was released
     assert out2[-1]["status"] != "busy"
+
+
+def test_delegate_is_declared_async_with_a_timeout_past_the_backend_budget():
+    # Documented Pipecat way (Function Calling > Per-Tool Options): @tool_options on the function.
+    class B:
+        timeout = 100
+
+        async def run(self, *a, **k):
+            return BackendResult("x")
+
+    (delegate,) = make_tools(B(), Registry(), lambda sid: None)
+    assert delegate._pipecat_cancel_on_interruption is False
+    assert delegate._pipecat_timeout_secs == 130  # backend timeout + margin, so the framework never cuts a live run
+
+
+def test_timeout_defaults_when_the_backend_has_none():
+    (delegate,) = make_tools(FakeBackend([]), Registry(), lambda sid: None)
+    assert delegate._pipecat_timeout_secs == 330

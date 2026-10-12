@@ -6,7 +6,9 @@ from pathlib import Path
 from loguru import logger
 
 from backend import BackendResult
+from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.frames.frames import FunctionCallResultProperties
+from pipecat.services.llm_service import FunctionCallParams
 from workspace import resolve_workdir
 
 
@@ -15,7 +17,10 @@ def make_tools(backend, registry, settings_for, on_finish=None, workspace_root=N
     workspace_root = Path(workspace_root) if workspace_root else home / ".voice-instinct" / "workspace"
     state = {"session": None, "cwd": None, "running": False}  # ponytail: one task at a time, single user
 
-    async def delegate(params, task: str, directory: str = ""):
+    # Async call (Pipecat: Function Calling > Per-Tool Options): barge-in must not cancel it, and the
+    # framework deadline must outlive the backend's own timeout.
+    @tool_options(cancel_on_interruption=False, timeout_secs=getattr(backend, "timeout", 300) + 30)
+    async def delegate(params: FunctionCallParams, task: str, directory: str = ""):
         """Hand a real task (files, shell, web, code) to the backend agent and return its answer. Use for anything beyond casual conversation. If the answer is a question from Claude, ask the user and call this again with their reply to continue the same session.
 
         Args:
@@ -46,8 +51,8 @@ def make_tools(backend, registry, settings_for, on_finish=None, workspace_root=N
             state["session"], state["cwd"] = sid, str(wd)
             registry.upsert_session(sid, origin="delegated", mode="headless", state="running", cwd=str(wd))
             task_id = registry.create_task(sid, task)
-            # Early non-final result with run_llm: the call is async, so the user can keep talking
-            # while it runs, and Gemini goes straight to the tool call without saying anything first.
+            # Intermediate result (documented: is_final=False). run_llm=True on it is not in the docs
+            # (source honours it): without it Gemini calls the tool and says nothing, so the user hears silence.
             await params.result_callback(
                 {"status": "started", "instruction": "In one short sentence tell the user you've "
                  "started and where; you will be told when it's done."},

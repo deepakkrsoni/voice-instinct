@@ -377,3 +377,9 @@ def test_a_new_session_starts_with_both_sides_quiet():
         return relay._bot_active, relay._user_active
 
     assert run(go()) == (False, False)
+
+
+def test_bridge_tools_are_declared_async_so_barge_in_never_cancels_them():
+    reg, relay, task, ctx, bridge = setup()
+    for fn in make_bridge_tools(bridge, relay, reg, FakeBackend()):
+        assert fn._pipecat_cancel_on_interruption is False, fn.__name__

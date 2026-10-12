@@ -5,7 +5,9 @@ import re
 import time
 
 from confirm import classify, last_user_text
+from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.frames.frames import LLMMessagesAppendFrame, LLMRunFrame
+from pipecat.services.llm_service import FunctionCallParams
 
 
 def _quote_safe(text):
@@ -146,7 +148,8 @@ async def start_session(relay, task, context):
 
 
 def make_bridge_tools(bridge, relay, registry, backend):
-    async def answer_question(params, question_id: int):
+    @tool_options(cancel_on_interruption=False)
+    async def answer_question(params: FunctionCallParams, question_id: int):
         """Record the user's spoken yes or no for a pending Claude question. Call only after the user has answered it.
 
         Args:
@@ -170,7 +173,8 @@ def make_bridge_tools(bridge, relay, registry, backend):
         bridge.resolve(question_id, "allow" if verdict == "yes" else "deny")
         await params.result_callback({"status": "allowed" if verdict == "yes" else "denied"})
 
-    async def list_sessions(params):
+    @tool_options(cancel_on_interruption=False)
+    async def list_sessions(params: FunctionCallParams):
         """List the Claude sessions being tracked: what each is doing, its state, and any waiting questions."""
         now = time.time()
         rows = registry.list_sessions()[:10]
@@ -179,7 +183,8 @@ def make_bridge_tools(bridge, relay, registry, backend):
              "origin": r["origin"], "task": r["last_task"], "open_questions": r["open_questions"],
              "minutes": round((r["ended_at"] or now) - r["started_at"]) // 60} for r in rows]})
 
-    async def stop_session(params, session_id: str):
+    @tool_options(cancel_on_interruption=False)
+    async def stop_session(params: FunctionCallParams, session_id: str):
         """Stop a running delegated Claude session.
 
         Args:
