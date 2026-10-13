@@ -135,6 +135,7 @@ sway_rule() {
     say "swaymsg unavailable, so no resize/move; add to your config:  for_window [app_id=\"voice-instinct\"] $rule"
   fi
   say "         and a key:        bindsym \$mod+n exec voice-instinct toggle"
+  say "         (details: docs/sway.md)"
 }
 
 services() {
