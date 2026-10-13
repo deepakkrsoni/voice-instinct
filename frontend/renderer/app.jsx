@@ -2,32 +2,20 @@
 import { PipecatClient, RTVIEvent } from "@pipecat-ai/client-js";
 import { SmallWebRTCTransport, WavMediaManager } from "@pipecat-ai/small-webrtc-transport";
 import { createRoot } from "react-dom/client";
-import { Orb } from "./vendor/orb";
+import { Orb } from "orb-ui";
+import { createPipecatAdapter } from "orb-ui/adapters";
 
-const { initial, reduce, agentStateFor } = require("./state.js");
+const { initial, reduce } = require("./state.js");
 const { makeReconnector } = require("./reconnect.js");
 
 const backend = new URLSearchParams(location.search).get("backend") || "http://127.0.0.1:7860";
 let state = initial();
-const levels = { input: 0, output: 0 }; // read by the orb every frame, no re-render needed
 const root = createRoot(document.getElementById("root"));
-function render() {
-  root.render(
-    <Orb
-      agentState={agentStateFor(state.mode)}
-      volumeMode="manual"
-      getInputVolume={() => levels.input}
-      getOutputVolume={() => levels.output}
-      colors={["#8B5CF6", "#22D3EE"]}
-    />
-  );
-}
 let muted = false; // owned by the tray in main.js; re-applied after every connect
 
 function dispatch(type) {
   const before = state;
   state = reduce(state, { type });
-  render();
   if (state.visible !== before.visible) window.vi.setVisible(state.visible);
 }
 
@@ -39,16 +27,24 @@ client.on(RTVIEvent.UserStartedSpeaking, () => dispatch("user-start"));
 client.on(RTVIEvent.UserStoppedSpeaking, () => dispatch("user-stop"));
 client.on(RTVIEvent.BotStartedSpeaking, () => dispatch("bot-start"));
 client.on(RTVIEvent.BotStoppedSpeaking, () => dispatch("bot-stop"));
-client.on(RTVIEvent.LocalAudioLevel, (level) => { levels.input = level; });
-client.on(RTVIEvent.RemoteAudioLevel, (level) => { levels.output = level; });
 
 window.vi.onToggle(() => dispatch("toggle"));
 window.vi.onMute((m) => { muted = m; client.enableMic(!muted); });
 
+// The adapter drives the orb's look from RTVI events; our code owns connect/retry. adapter.start()
+// only marks "connecting" and calls our connect (it never reconnects by itself), so the reconnector
+// stays the single caller. The adapter plays the bot's audio (nothing else does: the transport only
+// plays the WebRTC remote track if an element is attached, and WavMediaManager's player is fed by
+// bufferBotAudio, which SmallWebRTC never calls).
+const adapter = createPipecatAdapter(client, {
+  connect: async () => {
+    client.enableMic(!muted); // mic follows mute before any audio can flow
+    await client.connect({ webrtcRequestParams: { endpoint: `${backend}/api/offer` } });
+  },
+});
 const reconnector = makeReconnector(async () => {
-  client.enableMic(!muted); // mic follows mute before any audio can flow
-  await client.connect({ webrtcRequestParams: { endpoint: `${backend}/api/offer` } });
+  await adapter.start();
   reconnector.succeeded();
 });
 reconnector.trigger();
-render();
+root.render(<Orb adapter={adapter} theme="cloud" interactive={false} aria-label="voice-instinct" />);

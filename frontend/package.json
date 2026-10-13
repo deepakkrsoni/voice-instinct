@@ -13,11 +13,9 @@
   "dependencies": {
     "@pipecat-ai/client-js": "~1.13.1",
     "@pipecat-ai/small-webrtc-transport": "~1.10.8",
-    "@react-three/drei": "^10.7.9",
-    "@react-three/fiber": "^9.8.1",
+    "orb-ui": "^0.10.0",
     "react": "^19.3.0",
-    "react-dom": "^19.3.0",
-    "three": "^0.186.1"
+    "react-dom": "^19.3.0"
   },
   "devDependencies": {
     "electron": "^44.7.0",
