@@ -451,3 +451,15 @@ def test_a_question_asked_just_before_a_reconnect_is_asked_again_in_the_new_sess
 
     new, q = run(go())
     assert len(new.frames) == 1 and f"question_id={q}" in new.frames[0].messages[0]["content"]
+
+
+def test_reattaching_the_same_session_does_not_ask_the_waiting_question_twice():
+    # SmallWebRTC fires on_client_connected again on an in-session ICE restart.
+    async def go():
+        reg, relay, task, ctx, bridge = setup("hi")
+        q = reg.add_question("s1", "permission", "ls", "Bash", {"command": "ls"})
+        await relay.raise_question(q)
+        await relay.attach_and_pump(task, ctx)
+        return task
+
+    assert len(run(go()).frames) == 1

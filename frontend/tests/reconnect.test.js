@@ -67,3 +67,15 @@ test("a hung connect times out and retries", async () => {
   r.trigger(); // still one retry pending: ignored
   assert.equal(timers.length, 3);
 });
+
+test("a retry while the client is still connecting does not call connect again", async () => {
+  // client-js throws on a second connect() mid-connect, and the orb would flash its error look.
+  let calls = 0;
+  const timers = [];
+  const r = makeReconnector(async () => { calls++; }, (fn, ms) => timers.push({ fn, ms }), { connecting: () => true });
+  r.trigger();
+  timers[0].fn();
+  await tick();
+  assert.equal(calls, 0);
+  assert.equal(timers.length, 1); // settled at once: no attempt timeout, no further retry
+});

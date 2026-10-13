@@ -177,6 +177,7 @@ def test_sway_rule_uses_gui_size_and_output_width(tmp_path):
         size = int(next((l.split("=")[1].split("#")[0] for l in (REPO / "config.toml").read_text().splitlines() if l.startswith("size")), size))
     assert f"resize set {size} {size}, move position {2560 - size - 24} 12" in out
     assert "bindsym $mod+n exec voice-instinct toggle" in out
+    assert "exec voice-instinct" in out.replace("exec voice-instinct toggle", "")  # Sway has no XDG autostart
 
 
 @pytest.mark.skipif(shutil.which("shellcheck") is None, reason="shellcheck not installed")
@@ -246,3 +247,13 @@ def test_rerun_with_every_package_present_does_not_ask_for_sudo(tmp_path):
     r = subprocess.run(["bash", str(SCRIPT)], capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
     assert "Not installing system packages" not in r.stderr and not (tmp_path / "sudo-ran").exists()
     assert "already installed" in r.stdout
+
+
+@pytest.mark.parametrize("restricted", ["1", "0"])
+def test_electron_sandbox_helper_is_set_up_where_user_namespaces_are_restricted(tmp_path, restricted):
+    # Ubuntu 24.04's AppArmor blocks unprivileged user namespaces; Electron then needs its SUID helper.
+    userns = tmp_path / "userns"
+    userns.write_text(restricted + "\n")
+    r, _ = run_clean(tmp_path, "--dry-run", extra_env={"VI_USERNS_FILE": str(userns)})
+    helper = "frontend/node_modules/electron/dist/chrome-sandbox"
+    assert ("sudo chmod 4755" in r.stdout and helper in r.stdout) == (restricted == "1")

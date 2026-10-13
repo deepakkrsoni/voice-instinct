@@ -47,7 +47,9 @@ if [ "$(id -u)" = 0 ] && [ "$DRY" = 0 ]; then echo "Run this as your normal user
 distro_install() {
   # shellcheck disable=SC1090
   . "$OS_RELEASE"
-  local family="${ID:-} ${ID_LIKE:-}"
+  local family="${ID:-} ${ID_LIKE:-}" have=1 c
+  for c in ${VI_PKG_CHECK:-bwrap socat curl tar bzip2 xz}; do command -v "$c" >/dev/null || have=0; done  # tests override
+  if [ "$have" = 1 ]; then say "System packages already installed: bubblewrap socat curl tar bzip2 xz"; return; fi
   case "$family" in
     *arch*) PKGS+=(xz); PM=(sudo pacman -S --needed "${PKGS[@]}") ;;
     *debian*|*ubuntu*) PKGS+=(xz-utils); PM=(sudo apt-get install -y "${PKGS[@]}") ;;
@@ -55,9 +57,6 @@ distro_install() {
     *) echo "Your distribution (${NAME:-unknown}) is not supported yet. Supported: Arch, Debian/Ubuntu, Fedora." >&2
        echo "Install these yourself, then re-run: ${PKGS[*]}" >&2; exit 1 ;;
   esac
-  local have=1 c
-  for c in ${VI_PKG_CHECK:-bwrap socat curl tar bzip2 xz}; do command -v "$c" >/dev/null || have=0; done  # tests override
-  if [ "$have" = 1 ]; then say "System packages already installed: ${PKGS[*]}"; return; fi
   say "System packages (needs sudo): ${PKGS[*]}"
   if [ "$DRY" = 0 ]; then
     ok=n  # no terminal or no answer (CI, curl | bash) means no: never run sudo unasked
@@ -139,6 +138,7 @@ sway_rule() {
     say "swaymsg unavailable, so no resize/move; add to your config:  for_window [app_id=\"voice-instinct\"] $rule"
   fi
   say "         and a key:        bindsym \$mod+n exec voice-instinct toggle"
+  say "         and, unless your config runs dex --autostart:  exec voice-instinct"
   say "         (details: docs/sway.md)"
 }
 
@@ -185,7 +185,7 @@ EOF
   fi
   case "${XDG_CURRENT_DESKTOP:-}${SWAYSOCK:+sway}${HYPRLAND_INSTANCE_SIGNATURE:+hyprland}" in
     *sway*) sway_rule ;;
-    *hyprland*|*Hyprland*) say "Hyprland: windowrulev2 = float, class:^(voice-instinct)\$ and windowrulev2 = pin, class:^(voice-instinct)\$" ;;
+    *hyprland*|*Hyprland*) say "Hyprland: windowrulev2 = float, class:^(voice-instinct)\$ and windowrulev2 = pin, class:^(voice-instinct)\$, and exec-once = voice-instinct (Hyprland does not run XDG autostart)" ;;
   esac
 }
 
@@ -212,6 +212,13 @@ config_and_key
 run sh -c "cd '$REPO/backend' && $UV sync --python 3.13"
 # npm 12 blocks install scripts, so fetch the Electron binary explicitly (harmless where npm already did)
 run sh -c "export PATH=\"$NODE_DIR/bin:\$PATH\"; cd '$REPO/frontend' && npm ci && node node_modules/electron/install.js && npm run build"
+# Ubuntu 24.04+ (AppArmor) blocks unprivileged user namespaces; Electron then needs its SUID sandbox helper.
+if [ "$(cat "${VI_USERNS_FILE:-/proc/sys/kernel/apparmor_restrict_unprivileged_userns}" 2>/dev/null)" = 1 ]; then
+  helper="$REPO/frontend/node_modules/electron/dist/chrome-sandbox"
+  say "Your system restricts user namespaces, so Electron's sandbox helper must be owned by root (sudo):"
+  run sudo chown root:root "$helper"
+  run sudo chmod 4755 "$helper"
+fi
 if ! command -v claude >/dev/null; then
   say "Install Claude Code (https://code.claude.com/docs) and log in with 'claude', then re-run this script."
 fi

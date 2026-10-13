@@ -54,9 +54,9 @@ def load(path=None) -> Config:
             if isinstance(data.get(section), dict) and key in data[section]:
                 values[field_name] = data[section][key]
     cfg = Config(**values)
-    cfg.name = cfg.name.strip() if isinstance(cfg.name, str) else ""
-    if not cfg.name:
-        raise ValueError("config.toml: [assistant] name must not be empty")
+    if not isinstance(cfg.name, str) or not cfg.name.strip():
+        raise ValueError("config.toml: [assistant] name must be non-empty text")
+    cfg.name = cfg.name.strip()
     if isinstance(cfg.gui_size, bool) or not isinstance(cfg.gui_size, int) or not 48 <= cfg.gui_size <= 1024:
         raise ValueError("config.toml: [gui] size must be a whole number of pixels from 48 to 1024")
     if isinstance(cfg.awake_timeout, bool) or not isinstance(cfg.awake_timeout, (int, float)) or cfg.awake_timeout <= 0:

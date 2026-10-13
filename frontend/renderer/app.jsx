@@ -51,10 +51,11 @@ const adapter = createPipecatAdapter(client, {
     await client.connect({ webrtcRequestParams: { endpoint: `${backend}/api/offer` } });
   },
 });
+const LIVE = ["authenticating", "connecting", "connected", "ready"]; // client-js refuses connect() in these
 const reconnector = makeReconnector(async () => {
   await adapter.start();
   reconnector.succeeded();
-});
+}, setTimeout, { connecting: () => LIVE.includes(client.state) });
 reconnector.trigger();
 // The wrapper is the drag handle and carries the hover effect (index.html); 80vmin leaves room for both.
 root.render(

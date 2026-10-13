@@ -1,10 +1,13 @@
 // Retry with backoff: at most one pending retry or in-flight connect at a time, each attempt
 // bounded by a timeout. A trigger during an attempt re-arms one retry after it settles. Unit-tested.
-function makeReconnector(connect, schedule = setTimeout, { start = 1000, max = 30000, timeout = 15000 } = {}) {
+// connecting(): the client is still connecting or already connected, so another connect() would only
+// throw (and flash the orb's error look). ponytail: a connect hung in "connecting" is then never retried.
+function makeReconnector(connect, schedule = setTimeout, { start = 1000, max = 30000, timeout = 15000, connecting = () => false } = {}) {
   let delay = start;
   let busy = false; // a retry is pending or a connect is in flight
   let again = false; // a trigger arrived while busy
   const run = () => {
+    if (connecting()) { busy = false; again = false; return; }
     let settled = false;
     const settle = (failed) => {
       if (settled) return; // late result of a timed-out attempt

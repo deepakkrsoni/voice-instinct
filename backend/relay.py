@@ -65,9 +65,10 @@ class Relay:
         self.on_question = None  # called before a question is spoken (wakes the orb)
 
     def attach(self, task, context):
+        if task is not self._task:
+            self._current = None  # a question spoken in the old session is asked again in this one
         self._task, self._context = task, context
         self._user_active = self._bot_active = self._force = False  # a new session starts quiet
-        self._current = None  # a question spoken in the old session is asked again in this one
 
     def user_turn(self, active: bool):
         self._user_active = active

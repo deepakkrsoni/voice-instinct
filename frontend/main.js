@@ -2,7 +2,7 @@
 const { app, BrowserWindow, Tray, Menu, ipcMain, screen, session } = require("electron");
 const path = require("node:path");
 
-const BACKEND = process.env.VI_BACKEND_URL || "http://127.0.0.1:7860";
+const BACKEND = "http://127.0.0.1:7860"; // the page's CSP allows only this backend
 const DEFAULTS = { name: "Nova", size: 128, position: "top-right" }; // same as backend/config.py
 app.setName("voice-instinct"); // Wayland app_id / X11 class, used by compositor window rules
 
