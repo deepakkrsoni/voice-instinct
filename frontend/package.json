@@ -1,0 +1,21 @@
+{
+  "name": "voice-instinct",
+  "productName": "voice-instinct",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Floating voice orb for voice-instinct",
+  "main": "main.js",
+  "scripts": {
+    "build": "esbuild renderer/app.js --bundle --format=iife --platform=browser --outfile=renderer/bundle.js",
+    "start": "npm run build && electron .",
+    "test": "node --test tests/"
+  },
+  "dependencies": {
+    "@pipecat-ai/client-js": "~1.13.1",
+    "@pipecat-ai/small-webrtc-transport": "~1.10.8"
+  },
+  "devDependencies": {
+    "electron": "^44.7.0",
+    "esbuild": "^0.28.2"
+  }
+}
