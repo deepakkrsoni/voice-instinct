@@ -42,3 +42,9 @@ Built on [Pipecat](https://docs.pipecat.ai).
   and the task (Gemini and Claude are cloud services); use Ollama for a local front model.
 
 Using a subscription CLI this way depends on the vendor's terms; check them before relying on it.
+
+## License
+
+[GNU AGPL v3.0](LICENSE). You may use, change and share it, but if you distribute it, or let
+people use a modified version over a network, you must give them its full source under the same
+license.

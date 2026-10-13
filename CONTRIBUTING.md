@@ -68,6 +68,5 @@ Security tab.)
 
 ## License
 
-A license has not been chosen yet ([#11](https://github.com/deepakkrsoni/voice-instinct/issues/11)).
-Until then, please hold off on large contributions; small fixes are fine, and the license decision
-will be recorded here.
+voice-instinct is licensed under the [GNU AGPL v3.0](LICENSE). By contributing, you agree that your
+contribution is licensed under the same terms.
