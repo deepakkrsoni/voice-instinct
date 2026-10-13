@@ -15,7 +15,7 @@ _SECTIONS = {
     "paths": {"models_dir": "models_dir", "data_dir": "data_dir", "workspace_dir": "workspace_dir",
               "backend_cwd": "backend_cwd"},
     "agent": {"permission_mode": "permission_mode", "backend_timeout": "backend_timeout",
-              "permission_timeout": "permission_timeout", "hook_port": "hook_port"},
+              "permission_timeout": "permission_timeout"},
 }
 
 
@@ -35,7 +35,6 @@ class Config:
     data_dir: str = "~/.voice-instinct"
     workspace_dir: str = "~/.voice-instinct/workspace"  # default folder for tasks that name none
     permission_timeout: float = 90
-    hook_port: int = 7860
     permission_mode: str = "auto"  # Claude Code mode for delegated runs; the sandbox bounds what auto may do
 
     @property

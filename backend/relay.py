@@ -75,8 +75,9 @@ class Relay:
         self._grace = None
         self.on_question = None  # called before a question is spoken (wakes the orb)
 
-    def attach(self, task, context):
-        self._sessions = [p for p in self._sessions if p[0] is not task] + [(task, context)]
+    def attach(self, task, context, wake=None):
+        self._sessions = [p for p in self._sessions if p[0] is not task] + [(task, context, wake)]
+        self.on_question = wake or self.on_question  # this session's orb is the one to wake
         if task is not self._task:
             self._current = None  # a question spoken in the old session is asked again in this one
         self._task, self._context = task, context
@@ -114,8 +115,8 @@ class Relay:
         self._force = True
         self._kick()
 
-    async def attach_and_pump(self, task, context):
-        self.attach(task, context)
+    async def attach_and_pump(self, task, context, wake=None):
+        self.attach(task, context, wake)
         for q in self.reg.open_questions():
             if q["id"] not in self._queue and q["id"] != self._current:
                 self._queue.append(q["id"])
@@ -190,10 +191,10 @@ class Relay:
             )
 
 
-async def start_session(relay, task, context):
+async def start_session(relay, task, context, wake=None):
     """Run when the orb connects: attach the relay (raising any waiting question). No greeting:
     the desktop app reconnects silently; it speaks only when woken or when Claude needs the user."""
-    await relay.attach_and_pump(task, context)
+    await relay.attach_and_pump(task, context, wake)
 
 
 def make_bridge_tools(bridge, relay, registry, backend):

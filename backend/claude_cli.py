@@ -42,11 +42,12 @@ def parse_stream(lines: Iterable[str]) -> BackendResult:
     return BackendResult(text="", is_error=True)
 
 
-def _agent_env() -> dict:
+def _agent_env(hide=()) -> dict:
     """Our environment minus other services' API keys (e.g. the front model's GEMINI_API_KEY from .env):
     the agent reads untrusted pages and must not be able to leak them. Its own ANTHROPIC_*/CLAUDE_* stay."""
     return {k: v for k, v in os.environ.items()
-            if not (k.endswith("_API_KEY") or k.endswith("_TOKEN")) or k.startswith(("ANTHROPIC_", "CLAUDE_"))}
+            if k not in hide and (not (k.endswith("_API_KEY") or k.endswith("_TOKEN"))
+                                  or k.startswith(("ANTHROPIC_", "CLAUDE_")))}
 
 
 def _kill_group(proc) -> None:
@@ -58,9 +59,10 @@ def _kill_group(proc) -> None:
 
 class ClaudeCodeBackend:
     def __init__(self, cmd: str = "claude", cwd: str | None = None, timeout: float = 120,
-                 permission_mode: str | None = "acceptEdits"):
+                 permission_mode: str | None = "acceptEdits", hide_env: Iterable[str] = ()):
         # acceptEdits: file edits inside the task's own folder don't prompt; shell commands still do.
         self.cmd, self.cwd, self.timeout, self.permission_mode = cmd, cwd, timeout, permission_mode
+        self.hide_env = tuple(hide_env)  # e.g. the front model's api_key_env, whatever it is called
         self._procs: dict[str, asyncio.subprocess.Process] = {}
         self._stopped: set[str] = set()
 
@@ -97,7 +99,7 @@ class ClaudeCodeBackend:
             args += ["--permission-mode", self.permission_mode]
         args += ["--", task]  # "--": a task starting with dashes must stay text, never a flag
         proc = await asyncio.create_subprocess_exec(
-            *args, cwd=cwd or self.cwd, stdin=asyncio.subprocess.DEVNULL, env=_agent_env(),
+            *args, cwd=cwd or self.cwd, stdin=asyncio.subprocess.DEVNULL, env=_agent_env(self.hide_env),
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             start_new_session=True,  # own process group so we can kill its Bash children too
         )

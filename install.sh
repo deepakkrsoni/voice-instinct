@@ -157,7 +157,7 @@ RestartSec=3
 # uv exits 143 when systemd stops it with SIGTERM; that is a normal stop
 SuccessExitStatus=143
 Environment=PYTHONUNBUFFERED=1
-Environment=PATH=$HOME_DIR/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PATH=$HOME_DIR/.local/bin:/usr/local/bin:/usr/bin:/bin${CLAUDE_BIN:+:${CLAUDE_BIN%/*}}
 ${CLAUDE_BIN:+Environment=VI_CLAUDE=$CLAUDE_BIN}
 
 [Install]
@@ -235,7 +235,12 @@ name="$(cfgval name)"
 if [ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ]; then
   # the orb, now; from the next login it starts by itself
   if [ "$DRY" = 1 ]; then run "$LAUNCHER" quit; run setsid -f "$LAUNCHER"  # quit first: an update must run the new code
-  else timeout 5 "$LAUNCHER" quit >/dev/null 2>&1 || true; sleep 1; setsid -f "$LAUNCHER" >/dev/null 2>&1; fi
+  else
+    timeout 5 "$LAUNCHER" quit >/dev/null 2>&1 || true
+    # wait for the old orb to let go of its single-instance lock, or the new one exits straight away
+    for _ in 1 2 3 4 5 6 7 8 9 10; do pgrep -f "electron/dist/electron.*$REPO/frontend" >/dev/null || break; sleep 0.5; done
+    setsid -f "$LAUNCHER" >/dev/null 2>&1
+  fi
   say "Done. Say \"Hey ${name:-Nova}\"."
 else
   say "Done. Start the orb with $LAUNCHER (it starts by itself from your next login), then say \"Hey ${name:-Nova}\"."

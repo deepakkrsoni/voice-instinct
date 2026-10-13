@@ -37,9 +37,13 @@ from shutdown import cancel_on_exit
 from wake import handle_client_message, make_wake
 
 load_dotenv(REPO_ROOT / ".env")
-# The journal keeps everything; DEBUG would fill it with every frame (VI_LOG_LEVEL=DEBUG to debug).
-logger.remove()
-logger.add(sys.stderr, level=os.environ.get("VI_LOG_LEVEL", "INFO"))
+
+
+def _quiet_logs():
+    """The journal keeps everything, and at DEBUG Pipecat logs whole LLM contexts (what the user said).
+    The runner's main() resets loguru to DEBUG after this module loads, so this runs per session."""
+    logger.remove()
+    logger.add(sys.stderr, level=os.environ.get("VI_LOG_LEVEL", "INFO"))  # VI_LOG_LEVEL=DEBUG to debug
 
 cfg = load()
 DATA = Path(cfg.data_dir).expanduser()
@@ -73,6 +77,8 @@ SYSTEM_PROMPT = (
     "result says done."
 )
 
+HOOK_PORT = 7860  # the runner's port: hooks post back to this same server
+
 NO_AGENT = (
     " Right now Claude Code is not available on this computer, so you have no tools and cannot run "
     "errands. If the user asks for one, say that Claude Code needs to be installed and logged in "
@@ -85,17 +91,19 @@ transport_params = {
 
 
 async def bot(runner_args: RunnerArguments):
+    _quiet_logs()
     transport = await create_transport(runner_args, transport_params)
 
     stt = ParakeetSTTService(model_dir=parakeet_dir(cfg))
     backend = ClaudeCodeBackend(cmd=os.environ.get("VI_CLAUDE", "claude"), cwd=cfg.backend_cwd,
-                                timeout=cfg.backend_timeout, permission_mode=cfg.permission_mode)
+                                timeout=cfg.backend_timeout, permission_mode=cfg.permission_mode,
+                                hide_env=(cfg.api_key_env,))
     llm = build_llm(cfg, SYSTEM_PROMPT if backend.available() else SYSTEM_PROMPT + NO_AGENT)
     tools = []
     if backend.available():
         autonomy = sandbox_settings(Path.home(), REPO_ROOT, DATA)
         settings_for = lambda sid: write_run_settings(
-            DATA / "runs", sid, HOOK_TOKEN, cfg.hook_port, extra=autonomy,
+            DATA / "runs", sid, HOOK_TOKEN, HOOK_PORT, extra=autonomy,
             hook_timeout=int(cfg.permission_timeout) + 10)  # Claude must outwait our own question timeout
         # Tools declare their own options with @tool_options; LLMContext(tools=...) is the registration.
         tools = [*make_tools(backend, registry, settings_for, on_finish=bridge.expire_session,
@@ -117,7 +125,6 @@ async def bot(runner_args: RunnerArguments):
             await holder["worker"].rtvi.send_server_message(msg)
 
     wake = make_wake(cfg.wake_phrases, cfg.awake_timeout, send_gui, hold=lambda: relay.asking)
-    relay.on_question = lambda: wake.wake("question")
 
     context = LLMContext(tools=tools)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
@@ -166,7 +173,7 @@ async def bot(runner_args: RunnerArguments):
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
-        await start_session(relay, worker, context)  # attaches the relay; no greeting
+        await start_session(relay, worker, context, lambda: wake.wake("question"))  # no greeting
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

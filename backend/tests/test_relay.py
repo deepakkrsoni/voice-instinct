@@ -534,3 +534,20 @@ def test_stop_session_with_a_blank_or_ambiguous_id_stops_nothing():
 
     out, backend = run(go())
     assert [o["status"] for o in out] == ["not_running", "not_running"] and backend.stopped == []
+
+
+def test_each_session_wakes_its_own_orb_when_a_question_comes():
+    # After the /client page leaves, the orb's session is re-attached: its own wake must fire, not the page's.
+    async def go():
+        reg, relay, orb, ctx, bridge = setup("hi")
+        woke = []
+        await relay.attach_and_pump(orb, ctx, lambda: woke.append("orb"))
+        page = FakeTask(ctx)
+        await relay.attach_and_pump(page, ctx, lambda: woke.append("page"))
+        relay.detach(page)
+        await asyncio.sleep(0.01)
+        q = reg.add_question("s1", "permission", "ls", "Bash", {"command": "ls"})
+        await relay.raise_question(q)
+        return woke
+
+    assert run(go()) == ["orb"]

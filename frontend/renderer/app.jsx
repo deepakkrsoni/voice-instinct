@@ -15,15 +15,17 @@ let muted = false; // owned by the tray in main.js; re-applied after every conne
 
 let micError = null; // set by a device error, cleared once our mic track really starts
 let backendUp = false; // after a failed connect: does the backend itself answer?
+let lastLine = null;
 function dispatch(type) {
   const before = state;
   state = reduce(state, { type });
   if (state.visible !== before.visible) window.vi.setVisible(state.visible);
-  window.vi.setStatus(statusLine(state.connected, micError, backendUp));
+  const line = statusLine(state.connected, micError, backendUp);
+  if (line !== lastLine) window.vi.setStatus((lastLine = line)); // a rebuilt tray menu closes if open
 }
 
 const client = new PipecatClient({ transport: new SmallWebRTCTransport({ mediaManager: new WavMediaManager() }), enableMic: true, enableCam: false });
-client.on(RTVIEvent.Connected, () => { dispatch("connected"); if (client.isMicEnabled !== !muted) client.enableMic(!muted); });
+client.on(RTVIEvent.Connected, () => { backendUp = false; dispatch("connected"); if (client.isMicEnabled !== !muted) client.enableMic(!muted); });
 client.on(RTVIEvent.BotReady, () => { if (state.visible) client.sendClientMessage("wake"); }); // shown before it connected
 client.on(RTVIEvent.Disconnected, () => { dispatch("disconnected"); reconnector.trigger(); });
 client.on(RTVIEvent.ServerMessage, (msg) => { if (msg && (msg.type === "wake" || msg.type === "sleep")) dispatch(msg.type); });

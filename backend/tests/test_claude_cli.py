@@ -164,3 +164,9 @@ def test_a_cli_that_fails_without_a_result_says_why(tmp_path):
     cli = _script(tmp_path, 'echo "Invalid API key · Please run /login" >&2\nexit 1\n')
     r = asyncio.run(ClaudeCodeBackend(cmd=cli).run("x"))
     assert r.is_error and "Please run /login" in r.text
+
+
+def test_the_configured_key_is_hidden_even_without_a_standard_name(tmp_path, monkeypatch):
+    monkeypatch.setenv("MY_GEMINI", "secret")  # [model] api_key_env = "MY_GEMINI"
+    cli = _script(tmp_path, 'printf \'{"type":"result","result":"[%s]"}\\n\' "$MY_GEMINI"\n')
+    assert asyncio.run(ClaudeCodeBackend(cmd=cli, hide_env=("MY_GEMINI",)).run("x")).text == "[]"

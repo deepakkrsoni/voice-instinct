@@ -269,7 +269,10 @@ def render_unit(tmp_path, claude_bin):
 
 def test_the_service_is_told_where_claude_is_even_outside_the_default_path(tmp_path):
     # npm-global or nvm installs live outside the unit's PATH; the installer's own shell can see them.
-    assert "Environment=VI_CLAUDE=/home/u/.nvm/bin/claude" in render_unit(tmp_path, "/home/u/.nvm/bin/claude")
+    unit = render_unit(tmp_path, "/home/u/.nvm/bin/claude")
+    assert "Environment=VI_CLAUDE=/home/u/.nvm/bin/claude" in unit
+    path = next(l for l in unit.splitlines() if l.startswith("Environment=PATH="))
+    assert path.endswith(":/home/u/.nvm/bin")  # an npm-installed claude is a node script: node sits beside it
     assert "VI_CLAUDE" not in render_unit(tmp_path, "")
 
 

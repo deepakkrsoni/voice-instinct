@@ -15,7 +15,7 @@ def test_overrides(tmp_path):
 
 def test_bridge_defaults():
     c = load("/nonexistent.toml")
-    assert (c.permission_timeout, c.hook_port, c.data_dir) == (90, 7860, "~/.voice-instinct")
+    assert (c.permission_timeout, c.data_dir) == (90, "~/.voice-instinct")
 
 
 def test_workspace_default_is_a_dot_folder_in_home():
