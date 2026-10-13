@@ -389,3 +389,24 @@ def test_a_question_wakes_the_assistant_before_it_is_spoken():
         return order
 
     assert run(go()) == ["woke", "spoken"]
+
+
+def test_a_failing_wake_callback_must_not_stop_the_question():
+    async def go():
+        reg, relay, task, ctx, bridge = setup("hi")
+
+        def boom():
+            raise RuntimeError("wake exploded")
+
+        relay.on_question = boom
+        q1 = _raise_one(relay, reg)
+        await relay.raise_question(q1)
+        n1 = sum("question_id=" in m.get("content", "") for m in task.ctx.msgs)
+        q2 = reg.add_question("s1", "permission", "pwd", "Bash", {"command": "pwd"})
+        await relay.raise_question(q2)
+        relay.question_closed(q1)
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        return n1, f"question_id={q2})" in str([m.get("content", "") for m in task.ctx.msgs])
+
+    assert run(go()) == (1, True)

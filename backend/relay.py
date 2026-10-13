@@ -4,6 +4,8 @@ import asyncio
 import re
 import time
 
+from loguru import logger
+
 from confirm import classify, last_user_text
 from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.frames.frames import LLMMessagesAppendFrame
@@ -136,7 +138,10 @@ class Relay:
             self._current = qid
             text = frame_question(q, self.reg.get_session(q["session_id"]))
             if self.on_question:
-                self.on_question()
+                try:
+                    self.on_question()
+                except Exception:
+                    logger.exception("wake-up on question failed; speaking it anyway")
             await self._task.queue_frames(
                 [LLMMessagesAppendFrame(messages=[{"role": "developer", "content": text}], run_llm=True)]
             )
