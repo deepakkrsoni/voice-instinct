@@ -33,3 +33,13 @@ test("losing the backend hides the orb instead of freezing it", () => {
 test("unknown events change nothing", () => {
   assert.deepEqual(run("wake", "nonsense"), run("wake"));
 });
+
+const { agentStateFor } = require("../renderer/state.js");
+
+test("orb state follows the mode (speaking is the orb's 'talking')", () => {
+  assert.equal(agentStateFor("listening"), "listening");
+  assert.equal(agentStateFor("thinking"), "thinking");
+  assert.equal(agentStateFor("speaking"), "talking");
+  assert.equal(agentStateFor("hidden"), null);
+  assert.equal(agentStateFor("anything-else"), null);
+});

@@ -29,4 +29,9 @@ function reduce(state, event) {
   }
 }
 
-module.exports = { initial, reduce };
+const ORB_STATES = { listening: "listening", thinking: "thinking", speaking: "talking" };
+function agentStateFor(mode) {
+  return ORB_STATES[mode] || null;
+}
+
+module.exports = { initial, reduce, agentStateFor };
