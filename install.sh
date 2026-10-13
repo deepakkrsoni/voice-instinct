@@ -55,6 +55,9 @@ distro_install() {
     *) echo "Your distribution (${NAME:-unknown}) is not supported yet. Supported: Arch, Debian/Ubuntu, Fedora." >&2
        echo "Install these yourself, then re-run: ${PKGS[*]}" >&2; exit 1 ;;
   esac
+  local have=1 c
+  for c in ${VI_PKG_CHECK:-bwrap socat curl tar bzip2 xz}; do command -v "$c" >/dev/null || have=0; done  # tests override
+  if [ "$have" = 1 ]; then say "System packages already installed: ${PKGS[*]}"; return; fi
   say "System packages (needs sudo): ${PKGS[*]}"
   if [ "$DRY" = 0 ]; then
     ok=n  # no terminal or no answer (CI, curl | bash) means no: never run sudo unasked
@@ -163,7 +166,8 @@ EOF
 # voice-instinct launcher: "voice-instinct" starts the orb, "voice-instinct toggle" shows or hides it.
 args=()
 [ "\${1:-}" = toggle ] && args=(--toggle)
-exec "$REPO/frontend/node_modules/.bin/electron" "$REPO/frontend" "\${args[@]}"
+# The real binary: node_modules/.bin/electron is a node script, and many desktops have no system node.
+exec "$REPO/frontend/node_modules/electron/dist/electron" "$REPO/frontend" "\${args[@]}"
 EOF
   write "$AUTOSTART" 644 <<EOF
 [Desktop Entry]

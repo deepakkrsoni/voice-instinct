@@ -77,3 +77,10 @@ def test_a_size_or_timeout_that_is_not_a_sensible_number_fails_fast(tmp_path, bo
     f.write_text(body)
     with pytest.raises(ValueError, match="config.toml"):
         load(f)
+
+
+def test_a_name_that_is_not_text_fails_fast_with_a_clear_message(tmp_path):
+    f = tmp_path / "c.toml"
+    f.write_text("[assistant]\nname = 7\n")
+    with pytest.raises(ValueError, match="name"):
+        load(f)

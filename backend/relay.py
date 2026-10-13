@@ -67,6 +67,7 @@ class Relay:
     def attach(self, task, context):
         self._task, self._context = task, context
         self._user_active = self._bot_active = self._force = False  # a new session starts quiet
+        self._current = None  # a question spoken in the old session is asked again in this one
 
     def user_turn(self, active: bool):
         self._user_active = active

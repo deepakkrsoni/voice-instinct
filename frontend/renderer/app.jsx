@@ -23,6 +23,7 @@ function dispatch(type, extra) {
 
 const client = new PipecatClient({ transport: new SmallWebRTCTransport({ mediaManager: new WavMediaManager() }), enableMic: true, enableCam: false });
 client.on(RTVIEvent.Connected, () => { dispatch("connected"); client.enableMic(!muted); });
+client.on(RTVIEvent.BotReady, () => { if (state.visible) client.sendClientMessage("wake"); }); // shown before it connected
 client.on(RTVIEvent.Disconnected, () => { dispatch("disconnected"); reconnector.trigger(); });
 client.on(RTVIEvent.ServerMessage, (msg) => { if (msg && (msg.type === "wake" || msg.type === "sleep")) dispatch(msg.type); });
 client.on(RTVIEvent.DeviceError, (err) => dispatch("device-error", { reason: err?.type || "unknown" }));
@@ -33,7 +34,7 @@ client.on(RTVIEvent.BotStoppedSpeaking, () => dispatch("bot-stop"));
 
 window.vi.onToggle(() => {
   dispatch("toggle");
-  if (state.visible && state.connected) client.sendClientMessage("wake"); // shown by hand: let it hear you
+  if (state.connected) client.sendClientMessage(state.visible ? "wake" : "sleep"); // by hand: listen, or stop
 });
 window.vi.onMute((m) => { muted = m; client.enableMic(!muted); });
 

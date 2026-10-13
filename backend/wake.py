@@ -36,6 +36,11 @@ class ProgrammaticWake(WakePhraseUserTurnStartStrategy):
         elif not self.awake:
             self._transition_to_awake(reason)
 
+    def sleep(self) -> None:
+        """Stop listening now, even while a question waits (the user hid the orb)."""
+        if self.awake:
+            super()._transition_to_idle()
+
     def keep_awake(self) -> None:
         """Restart the awake window, e.g. when the bot finishes speaking, so the user can reply."""
         if self.awake:
@@ -57,6 +62,8 @@ def make_wake(phrases, timeout, send, hold=lambda: False) -> ProgrammaticWake:
 
 
 def handle_client_message(wake: ProgrammaticWake, msg) -> None:
-    """The desktop app sends "wake" when the user shows the orb by hand, so it can hear them."""
+    """The desktop app sends "wake" / "sleep" when the user shows or hides the orb by hand."""
     if msg.type == "wake":
         wake.wake("shown")
+    elif msg.type == "sleep":
+        wake.sleep()

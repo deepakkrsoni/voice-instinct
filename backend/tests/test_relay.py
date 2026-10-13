@@ -437,3 +437,17 @@ def test_asking_is_true_from_speaking_a_question_until_it_is_closed():
         return before, during, relay.asking
 
     assert run(go()) == (False, True, False)
+
+
+def test_a_question_asked_just_before_a_reconnect_is_asked_again_in_the_new_session():
+    async def go():
+        reg, relay, old, ctx, bridge = setup("hi")
+        q = reg.add_question("s1", "permission", "ls", "Bash", {"command": "ls"})
+        await relay.raise_question(q)  # spoken in the old session, then the orb drops
+        new = FakeTask(ctx)
+        await relay.attach_and_pump(new, ctx)
+        relay.detach(old)  # the old pipeline finishes after the new one attached
+        return new, q
+
+    new, q = run(go())
+    assert len(new.frames) == 1 and f"question_id={q}" in new.frames[0].messages[0]["content"]

@@ -54,7 +54,7 @@ def load(path=None) -> Config:
             if isinstance(data.get(section), dict) and key in data[section]:
                 values[field_name] = data[section][key]
     cfg = Config(**values)
-    cfg.name = cfg.name.strip()
+    cfg.name = cfg.name.strip() if isinstance(cfg.name, str) else ""
     if not cfg.name:
         raise ValueError("config.toml: [assistant] name must not be empty")
     if isinstance(cfg.gui_size, bool) or not isinstance(cfg.gui_size, int) or not 48 <= cfg.gui_size <= 1024:

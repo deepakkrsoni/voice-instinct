@@ -41,8 +41,10 @@ function placement(cfg) {
   return spots[cfg.position] || spots["bottom-right"];
 }
 
+let loaded = false, pendingToggle = false; // a toggle before the page loads is applied once it has
 function toggle() {
-  if (win) win.webContents.send("toggle");
+  if (win && loaded) win.webContents.send("toggle");
+  else pendingToggle = true;
 }
 
 function createWindow() {
@@ -55,7 +57,11 @@ function createWindow() {
     webPreferences: { preload: path.join(__dirname, "preload.js"), contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
   win.setAlwaysOnTop(true, "floating");
-  win.webContents.on("did-finish-load", () => win.webContents.send("mute", muted)); // page reloads forget it
+  win.webContents.on("did-finish-load", () => {
+    win.webContents.send("mute", muted); // page reloads forget it
+    loaded = true;
+    if (pendingToggle) { pendingToggle = false; toggle(); }
+  });
   // Nothing but our own page: no navigation, no new windows.
   win.webContents.on("will-navigate", (e) => e.preventDefault());
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
@@ -73,7 +79,9 @@ app.on("second-instance", (_event, argv) => {
 app.whenReady().then(async () => {
   // Only the microphone, only for our own page.
   const ours = (wc) => wc === win?.webContents;
-  session.defaultSession.setPermissionRequestHandler((wc, permission, cb) => cb(permission === "media" && ours(wc)));
+  const micOnly = (types) => !types || types.every((t) => t === "audio");
+  session.defaultSession.setPermissionRequestHandler((wc, permission, cb, details) =>
+    cb(permission === "media" && ours(wc) && micOnly(details?.mediaTypes)));
   session.defaultSession.setPermissionCheckHandler((wc, permission) => permission === "media" && ours(wc));
   createWindow();
   tray = new Tray(path.join(__dirname, "icon.png"));

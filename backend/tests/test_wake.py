@@ -150,3 +150,12 @@ def test_a_wake_before_the_pipeline_starts_takes_effect_once_it_does():
     # A reconnect with an open question can wake the gate before the aggregator's setup ran.
     users, _, sent, _ = asyncio.run(converse(["yes go ahead"], early=lambda w: w.wake("question")))
     assert users == ["yes go ahead"] and sent[0] == {"type": "wake", "reason": "question"}
+
+
+def test_hiding_the_orb_by_hand_puts_it_to_sleep_even_with_a_question_open():
+    def shown_then_hidden(w):
+        handle_client_message(w, SimpleNamespace(type="wake", data=None))
+        handle_client_message(w, SimpleNamespace(type="sleep", data=None))
+
+    users, _, sent, wake = asyncio.run(converse(["what's on today"], hold=lambda: True, before=shown_then_hidden))
+    assert users == [] and {"type": "sleep"} in sent and not wake.awake

@@ -14,7 +14,7 @@ def run(tmp_path, os_id, *args):
     rel.write_text(f'ID={os_id}\nNAME="{os_id}"\n')
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
-    env = {**os.environ, "VI_OS_RELEASE": str(rel), "VI_HOME": str(home)}
+    env = {**os.environ, "VI_OS_RELEASE": str(rel), "VI_HOME": str(home), "VI_PKG_CHECK": "not-installed-tool"}
     return subprocess.run(["bash", str(SCRIPT), *args], capture_output=True, text=True, env=env), home
 
 
@@ -34,7 +34,7 @@ def run_clean(tmp_path, *args, extra_env=None):
     rel.write_text('ID=arch\nNAME="arch"\n')
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
-    env = {**os.environ, "VI_OS_RELEASE": str(rel), "VI_HOME": str(home), **(extra_env or {})}
+    env = {**os.environ, "VI_OS_RELEASE": str(rel), "VI_HOME": str(home), "VI_PKG_CHECK": "not-installed-tool", **(extra_env or {})}
     return subprocess.run(["bash", str(repo / "install.sh"), *args], capture_output=True, text=True, env=env), home
 
 
@@ -64,7 +64,7 @@ def uninstall_fixture(tmp_path):
         (home / f).write_text("x")
     rel = tmp_path / "os-release"
     rel.write_text('ID=arch\nNAME="arch"\n')
-    env = {**os.environ, "VI_OS_RELEASE": str(rel), "VI_HOME": str(home), "PATH": f"{fake}:{os.environ['PATH']}"}
+    env = {**os.environ, "VI_OS_RELEASE": str(rel), "VI_HOME": str(home), "VI_PKG_CHECK": "not-installed-tool", "PATH": f"{fake}:{os.environ['PATH']}"}
     return home, env
 
 
@@ -170,7 +170,7 @@ def test_sway_rule_uses_gui_size_and_output_width(tmp_path):
     rel.write_text('ID=arch\nNAME="arch"\n')
     home = tmp_path / "home"
     home.mkdir()
-    env = {**os.environ, "VI_OS_RELEASE": str(rel), "VI_HOME": str(home), "SWAYSOCK": "/x", "PATH": f"{fake}:{os.environ['PATH']}"}
+    env = {**os.environ, "VI_OS_RELEASE": str(rel), "VI_HOME": str(home), "VI_PKG_CHECK": "not-installed-tool", "SWAYSOCK": "/x", "PATH": f"{fake}:{os.environ['PATH']}"}
     out = subprocess.run(["bash", str(SCRIPT), "--dry-run"], capture_output=True, text=True, env=env).stdout
     size = int(next(l.split("=")[1].split("#")[0] for l in (REPO / "config.example.toml").read_text().splitlines() if l.startswith("size")))
     if (REPO / "config.toml").exists():
@@ -198,7 +198,51 @@ def test_no_answer_at_the_sudo_prompt_means_no(tmp_path):
     rel.write_text('ID=arch\nNAME="arch"\n')
     home = tmp_path / "home"
     home.mkdir()
-    env = {**os.environ, "VI_OS_RELEASE": str(rel), "VI_HOME": str(home), "PATH": f"{fake}:{os.environ['PATH']}"}
+    env = {**os.environ, "VI_OS_RELEASE": str(rel), "VI_HOME": str(home), "VI_PKG_CHECK": "not-installed-tool", "PATH": f"{fake}:{os.environ['PATH']}"}
     r = subprocess.run(["bash", str(SCRIPT)], capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
     assert r.returncode != 0 and not (tmp_path / "sudo-ran").exists()
     assert "sudo pacman -S --needed" in r.stderr  # tells the user what to run instead
+
+
+def test_launcher_starts_electron_without_a_system_node(tmp_path):
+    # Debian and Fedora desktops have no `node`; the installer's pinned Node is only on PATH for the build.
+    src = SCRIPT.read_text()
+    body = src.split('write "$LAUNCHER" 755 <<EOF\n', 1)[1].split("\nEOF\n", 1)[0]
+    repo = tmp_path / "repo"
+    fe = repo / "frontend" / "node_modules"
+    (fe / "electron" / "dist").mkdir(parents=True)
+    (fe / ".bin").mkdir()
+    (fe / "electron" / "cli.js").write_text("#!/usr/bin/env node\n")
+    (fe / "electron" / "cli.js").chmod(0o755)
+    (fe / ".bin" / "electron").symlink_to("../electron/cli.js")
+    ran = tmp_path / "ran"
+    (fe / "electron" / "dist" / "electron").write_text(f'#!/bin/sh\necho "$@" > {ran}\n')
+    (fe / "electron" / "dist" / "electron").chmod(0o755)
+    launcher = tmp_path / "voice-instinct"
+    launcher.write_text(body.replace("\\$", "$").replace("$REPO", str(repo)))
+    empty = tmp_path / "nopath"
+    empty.mkdir()
+    r = subprocess.run(["/bin/bash", str(launcher), "toggle"], capture_output=True, text=True, env={"PATH": str(empty)})
+    assert r.returncode == 0, r.stderr
+    assert ran.read_text().split() == [str(repo / "frontend"), "--toggle"]
+
+
+def test_rerun_with_every_package_present_does_not_ask_for_sudo(tmp_path):
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    (fake / "sudo").write_text(f"#!/bin/sh\ntouch {tmp_path}/sudo-ran\n")
+    for tool in ("sudo", "bwrap", "socat", "tar", "bzip2", "xz"):
+        if tool != "sudo":
+            (fake / tool).write_text("#!/bin/sh\nexit 0\n")
+        (fake / tool).chmod(0o755)
+    for tool in ("curl", "systemctl", "uv", "npm"):  # stop right after the package step, touch nothing real
+        (fake / tool).write_text("#!/bin/sh\nexit 1\n")
+        (fake / tool).chmod(0o755)
+    rel = tmp_path / "os-release"
+    rel.write_text('ID=arch\nNAME="arch"\n')
+    home = tmp_path / "home"
+    home.mkdir()
+    env = {**os.environ, "VI_OS_RELEASE": str(rel), "VI_HOME": str(home), "PATH": f"{fake}:/usr/bin:/bin"}
+    r = subprocess.run(["bash", str(SCRIPT)], capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
+    assert "Not installing system packages" not in r.stderr and not (tmp_path / "sudo-ran").exists()
+    assert "already installed" in r.stdout
