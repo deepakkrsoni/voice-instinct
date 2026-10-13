@@ -16,8 +16,10 @@ class FakeRelay:
     async def raise_question(self, qid):
         self.raised.append(qid)
 
-    def question_closed(self, qid):
+    def question_closed(self, qid, expired=False):
         self.closed.append(qid)
+        if expired:
+            self.expired = getattr(self, "expired", []) + [qid]
 
 
 PAYLOAD = {"session_id": "s1", "cwd": "/w", "hook_event_name": "PermissionRequest",
@@ -185,6 +187,45 @@ def test_settings_file_is_private_and_access_log_hides_tokens(tmp_path):
 
     path = write_run_settings(tmp_path, "s", "tok", 7860)
     assert stat.S_IMODE(__import__("os").stat(path).st_mode) == 0o600
-    hook_line = logging.LogRecord("uvicorn.access", 20, "", 0, '"POST /hook/tok/Stop" 200', None, None)
-    other = logging.LogRecord("uvicorn.access", 20, "", 0, '"GET / HTTP/1.1" 200', None, None)
-    assert hide_hook_tokens(hook_line) is False and hide_hook_tokens(other) is True
+    fmt = '%s - "%s %s HTTP/%s" %d'  # uvicorn's access-log record
+    hook_line = logging.LogRecord("uvicorn.access", 20, "", 0, fmt, ("127.0.0.1:1", "POST", "/hook/sekret/Stop", "1.1", 403), None)
+    other = logging.LogRecord("uvicorn.access", 20, "", 0, fmt, ("127.0.0.1:1", "GET", "/", "1.1", 200), None)
+    # Hook calls stay in the log (a refused hook must be visible) with the token blanked out.
+    assert hide_hook_tokens(hook_line) is True and hide_hook_tokens(other) is True
+    assert "sekret" not in hook_line.getMessage() and "/hook/…/Stop" in hook_line.getMessage() and "403" in hook_line.getMessage()
+
+
+def test_a_timeout_tells_the_relay_the_question_expired_but_an_answer_does_not():
+    async def go():
+        b, reg, relay = make(timeout=0.05)
+        await b.on_permission_request(PAYLOAD)
+        t = asyncio.create_task(b.on_permission_request({**PAYLOAD, "tool_input": {"command": "ls"}}))
+        await asyncio.sleep(0)
+        b.resolve(reg.open_questions()[0]["id"], "deny")
+        await t
+        return relay
+
+    relay = asyncio.run(go())
+    assert relay.closed == [1, 2] and relay.expired == [1]
+
+
+def test_a_non_ascii_token_in_the_url_is_rejected_not_a_server_error():
+    b, reg, _ = make()
+    app = FastAPI()
+    app.include_router(make_router(b, "sekret"))
+    assert TestClient(app).post("/hook/sékret/Stop", json={"session_id": "s3"}).status_code == 404
+
+
+def test_an_existing_token_file_is_made_private_again(tmp_path):
+    p = tmp_path / "hook-token"
+    load_token(p)
+    p.chmod(0o644)
+    load_token(p)
+    assert stat.S_IMODE(p.stat().st_mode) == 0o600
+
+
+def test_web_requests_are_described_in_words_not_json():
+    from hooks import describe
+    assert describe("WebFetch", {"url": "https://example.com/deals", "prompt": "find prices"}) == "WebFetch: https://example.com/deals"
+    assert describe("WebSearch", {"query": "cheap flights to Goa"}) == "WebSearch: cheap flights to Goa"
+    assert describe("Edit", "not a dict").startswith("Edit")  # never crashes into a silent denial

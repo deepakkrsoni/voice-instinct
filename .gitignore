@@ -1,5 +1,10 @@
 .env
+config.toml
 .venv/
+backend/.venv/
 __pycache__/
 .superpowers/
 bot.log
+frontend/node_modules/
+frontend/renderer/bundle.js
+frontend.log

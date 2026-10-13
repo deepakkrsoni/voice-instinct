@@ -4,7 +4,7 @@ import os
 import time
 from pathlib import Path
 
-from backend import READ_ONLY_TOOLS, ClaudeCodeBackend, parse_stream
+from claude_cli import READ_ONLY_TOOLS, ClaudeCodeBackend, parse_stream
 
 FAKE = str(Path(__file__).parent / "fake_claude.sh")
 
@@ -147,3 +147,45 @@ def test_run_uses_the_given_cwd_and_accept_edits_mode(tmp_path):
     assert cwd == str(work) and "--permission-mode acceptEdits" in args
     plain = asyncio.run(ClaudeCodeBackend(cmd=cli, permission_mode=None).run("t")).text
     assert "--permission-mode" not in plain
+
+
+def test_the_agent_does_not_inherit_this_apps_model_keys(tmp_path, monkeypatch):
+    # The agent reads untrusted web pages; it must not be able to read (and leak) the front model's key.
+    monkeypatch.setenv("GEMINI_API_KEY", "secret-gemini")
+    monkeypatch.setenv("OPENAI_API_KEY", "secret-openai")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "claude-own")  # Claude Code's own login must still work
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "claude-oauth")
+    cli = _script(tmp_path, 'printf \'{"type":"result","result":"%s|%s|%s|%s"}\\n\' "$GEMINI_API_KEY" "$OPENAI_API_KEY" "$ANTHROPIC_API_KEY" "$CLAUDE_CODE_OAUTH_TOKEN"\n')
+    assert asyncio.run(ClaudeCodeBackend(cmd=cli).run("x")).text == "||claude-own|claude-oauth"
+
+
+def test_a_cli_that_fails_without_a_result_says_why(tmp_path):
+    # e.g. logged out: the reason is on stderr, and the user should hear it instead of "the task failed".
+    cli = _script(tmp_path, 'echo "Invalid API key · Please run /login" >&2\nexit 1\n')
+    r = asyncio.run(ClaudeCodeBackend(cmd=cli).run("x"))
+    assert r.is_error and "Please run /login" in r.text
+
+
+def test_the_configured_key_is_hidden_even_without_a_standard_name(tmp_path, monkeypatch):
+    monkeypatch.setenv("MY_GEMINI", "secret")  # [model] api_key_env = "MY_GEMINI"
+    cli = _script(tmp_path, 'printf \'{"type":"result","result":"[%s]"}\\n\' "$MY_GEMINI"\n')
+    assert asyncio.run(ClaudeCodeBackend(cmd=cli, hide_env=("MY_GEMINI",)).run("x")).text == "[]"
+
+
+def test_the_agent_gets_none_of_the_users_own_mcp_servers(tmp_path):
+    # Without this it inherits every MCP server in ~/.claude.json: other projects' logged-in browsers,
+    # Slack, Drive, messaging. An errand agent reading untrusted pages must not reach any of them.
+    cli = _script(tmp_path, 'printf \'{"type":"result","result":"%s"}\\n\' "$*"\n')
+    assert "--strict-mcp-config" in asyncio.run(ClaudeCodeBackend(cmd=cli).run("t")).text
+
+
+def test_the_errand_browser_is_the_only_mcp_server_given(tmp_path):
+    cli = _script(tmp_path, 'printf \'{"type":"result","result":"%s"}\\n\' "$*"\n')
+    args = asyncio.run(ClaudeCodeBackend(cmd=cli, mcp_config="/vi/browser-mcp.json").run("t")).text
+    assert "--strict-mcp-config" in args and "--mcp-config /vi/browser-mcp.json" in args
+
+
+def test_the_agent_loads_no_user_level_claude_settings_hooks_or_plugins(tmp_path):
+    # The user's ~/.claude/settings.json brings plugins and their SessionStart hooks into every errand.
+    cli = _script(tmp_path, 'printf \'{"type":"result","result":"%s"}\\n\' "$*"\n')
+    assert "--setting-sources project" in asyncio.run(ClaudeCodeBackend(cmd=cli).run("t")).text

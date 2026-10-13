@@ -22,6 +22,7 @@ class BackendResult:
     session_id: str | None = None
     denials: list[dict] = field(default_factory=list)
     is_error: bool = False
+    stopped: bool = False  # the user stopped it (stop_session): never resume this session
 
 
 def parse_stream(lines: Iterable[str]) -> BackendResult:
@@ -41,6 +42,14 @@ def parse_stream(lines: Iterable[str]) -> BackendResult:
     return BackendResult(text="", is_error=True)
 
 
+def _agent_env(hide=()) -> dict:
+    """Our environment minus other services' API keys (e.g. the front model's GEMINI_API_KEY from .env):
+    the agent reads untrusted pages and must not be able to leak them. Its own ANTHROPIC_*/CLAUDE_* stay."""
+    return {k: v for k, v in os.environ.items()
+            if k not in hide and (not (k.endswith("_API_KEY") or k.endswith("_TOKEN"))
+                                  or k.startswith(("ANTHROPIC_", "CLAUDE_")))}
+
+
 def _kill_group(proc) -> None:
     try:
         os.killpg(proc.pid, signal.SIGKILL)
@@ -50,9 +59,12 @@ def _kill_group(proc) -> None:
 
 class ClaudeCodeBackend:
     def __init__(self, cmd: str = "claude", cwd: str | None = None, timeout: float = 120,
-                 permission_mode: str | None = "acceptEdits"):
+                 permission_mode: str | None = "acceptEdits", hide_env: Iterable[str] = (),
+                 mcp_config: str | None = None):
         # acceptEdits: file edits inside the task's own folder don't prompt; shell commands still do.
         self.cmd, self.cwd, self.timeout, self.permission_mode = cmd, cwd, timeout, permission_mode
+        self.hide_env = tuple(hide_env)  # e.g. the front model's api_key_env, whatever it is called
+        self.mcp_config = mcp_config  # the only MCP servers the agent gets (the errand browser)
         self._procs: dict[str, asyncio.subprocess.Process] = {}
         self._stopped: set[str] = set()
 
@@ -80,7 +92,11 @@ class ClaudeCodeBackend:
             return BackendResult(text="The Claude CLI is not installed.", is_error=True)
         tools = ",".join([*READ_ONLY_TOOLS, *extra_allowed])
         args = [self.cmd, "-p", "--output-format", "stream-json", "--verbose",
-                "--allowedTools", tools]
+                "--allowedTools", tools,
+                "--strict-mcp-config",  # none of the user's own MCP servers (their browsers, Slack, mail)
+                "--setting-sources", "project"]  # nor their ~/.claude settings, plugins or hooks
+        if self.mcp_config:
+            args += ["--mcp-config", self.mcp_config]
         if session_id:
             args += ["--resume" if resume else "--session-id", session_id]
         if settings:
@@ -89,14 +105,14 @@ class ClaudeCodeBackend:
             args += ["--permission-mode", self.permission_mode]
         args += ["--", task]  # "--": a task starting with dashes must stay text, never a flag
         proc = await asyncio.create_subprocess_exec(
-            *args, cwd=cwd or self.cwd, stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+            *args, cwd=cwd or self.cwd, stdin=asyncio.subprocess.DEVNULL, env=_agent_env(self.hide_env),
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             start_new_session=True,  # own process group so we can kill its Bash children too
         )
         if session_id:
             self._procs[session_id] = proc
         try:
-            out, _ = await asyncio.wait_for(proc.communicate(), self.timeout)
+            out, err = await asyncio.wait_for(proc.communicate(), self.timeout)
         except asyncio.TimeoutError:
             return BackendResult(text="The task timed out.", is_error=True)
         finally:  # timeout or cancellation (barge-in): never leave the CLI running unattended
@@ -107,5 +123,9 @@ class ClaudeCodeBackend:
                 self._procs.pop(session_id, None)
         if session_id in self._stopped:
             self._stopped.discard(session_id)
-            return BackendResult(text="The task was stopped.", is_error=True)
-        return parse_stream(out.decode(errors="replace").splitlines())
+            return BackendResult(text="The task was stopped.", is_error=True, stopped=True)
+        res = parse_stream(out.decode(errors="replace").splitlines())
+        if res.is_error and not res.text:  # no result event: the CLI's last stderr line says why
+            lines = err.decode(errors="replace").strip().splitlines()
+            res.text = f"The Claude CLI failed: {lines[-1][:200]}" if lines else "The Claude CLI failed."
+        return res

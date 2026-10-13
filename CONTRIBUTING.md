@@ -14,26 +14,27 @@ machine. The project is early, so a small, well-tested change is worth more than
 
 ## Set up
 
-You need Linux, [uv](https://docs.astral.sh/uv/), the `claude` CLI logged in, `bubblewrap` and
-`socat` (the sandbox refuses to start without them), plus the local models described in the README.
+You need Linux and the `claude` CLI logged in. The installer handles the rest (system packages incl.
+`bubblewrap` and `socat`, uv, local models, backend and frontend, services).
 
 ```
-git clone https://github.com/deepakkrsoni/voice-instinct && cd voice-instinct
-uv sync
-echo 'GEMINI_API_KEY=...' > .env     # never commit this
-uv run bot.py                        # http://localhost:7860/client
+git clone https://github.com/deepakkrsoni/voice-instinct && cd voice-instinct && ./install.sh
 ```
+
+`./install.sh --dry-run` previews every step without changing anything; `--uninstall` removes the
+services and launcher (your data in `~/.voice-instinct` is kept), and `--uninstall --purge` deletes that too.
 
 ## Tests
 
 ```
-uv run pytest            # unit tests, no network, no models needed
-uv run pytest -m claude  # real-CLI tests; they use your Claude subscription
+cd backend && uv run pytest            # unit tests, no network, no models needed
+cd frontend && npm test                # frontend logic (state, tray, reconnect); no Electron needed
+cd backend && uv run pytest -m claude  # real-CLI tests; they use your Claude subscription
 ```
 
 Write the failing test first, watch it fail for the right reason, then make it pass. New behavior
 needs a test; a bug fix needs a test that failed before the fix. Do not mock what you can run: the
-fakes in `tests/` stand in for Pipecat and the CLI only at the edges.
+fakes in `backend/tests/` (and `frontend/tests/`) stand in for Pipecat and the CLI only at the edges.
 
 ## Rules that protect the user (please keep them true)
 
@@ -56,7 +57,7 @@ do not cover, say so in your PR and explain why.
 ## Pull requests
 
 1. Branch from `main` and keep the PR focused on one issue; reference it (`Closes #N`).
-2. Run `uv run pytest` and, if you touched the backend or hooks, `uv run pytest -m claude`.
+2. Run `cd backend && uv run pytest` and, if you touched the backend or hooks, `cd backend && uv run pytest -m claude`.
 3. Describe what you verified and what you did not (for example, not tried by voice).
 4. Be kind in review; we iterate in the open.
 

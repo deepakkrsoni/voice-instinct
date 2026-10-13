@@ -1,0 +1,25 @@
+# voice-instinct settings. Copy to config.toml (the installer does this) and edit.
+
+[assistant]
+name = "Nova"                 # you wake it with "Hey Nova" or "Okay Nova"
+awake_timeout = 10            # seconds of quiet before the orb hides
+
+[model]
+provider = "gemini"           # gemini | openai | ollama
+model = "gemini-3.8-flash"
+api_key_env = "GEMINI_API_KEY" # the key itself goes in .env, never here
+# base_url = "http://localhost:11434/v1"
+
+[gui]
+size = 128                    # orb size in pixels
+position = "top-right"        # bottom-right | bottom-left | top-right | top-left | center
+
+[paths]
+models_dir = "~/.voice-instinct/models"
+data_dir = "~/.voice-instinct"
+workspace_dir = "~/.voice-instinct/workspace"
+
+[agent]
+permission_mode = "auto"      # Claude Code permission mode inside the sandbox
+backend_timeout = 300
+permission_timeout = 90

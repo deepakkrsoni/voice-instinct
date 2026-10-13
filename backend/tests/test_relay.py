@@ -142,7 +142,9 @@ def test_no_denies_and_unclear_reasks_and_stale_ids_are_rejected():
         ctx.msgs.append({"role": "assistant", "content": "Claude wants to remove x. Okay?"})
         ctx.msgs.append({"role": "user", "content": "hmm what is that"})
         p, out = params(ctx)
-        await answer(p, q)
+        await answer(p, q)  # unclear: the question is put to the user again, with a fresh marker
+        await asyncio.sleep(0.01)
+        ctx.msgs.append({"role": "assistant", "content": "Should Claude remove x, yes or no?"})
         ctx.msgs.append({"role": "user", "content": "no don't"})
         await answer(p, q)
         await answer(p, 999)
@@ -265,7 +267,7 @@ class RecordingContext(FakeContext):
         self.msgs.append(m)
 
 
-def test_start_session_attaches_the_relay_and_greets_with_an_llm_run():
+def test_start_session_attaches_the_relay_without_speaking():
     async def go():
         reg = Registry()
         relay, ctx = Relay(reg), RecordingContext()
@@ -274,34 +276,21 @@ def test_start_session_attaches_the_relay_and_greets_with_an_llm_run():
         return relay, task
 
     relay, task = run(go())
-    assert relay._task is task
-    assert any(isinstance(f, LLMRunFrame) for f in task.frames)
+    assert relay._task is task and not any(isinstance(f, LLMRunFrame) for f in task.frames)
 
 
-def test_a_failing_greeting_must_not_leave_the_relay_detached():
-    # The demo failure: the greeting raised, and the relay (attached after it) never was,
-    # so Claude's permission questions were never spoken and timed out into denials.
-    class BrokenGreetingTask(FakeTask):
-        async def queue_frames(self, frames):
-            if any(isinstance(f, LLMRunFrame) for f in frames):
-                raise AttributeError("greeting exploded")
-            await super().queue_frames(frames)
-
+def test_start_session_still_speaks_a_question_that_was_waiting():
     async def go():
         reg = Registry()
         reg.upsert_session("s1")
         q = reg.add_question("s1", "permission", "ls", "Bash", {"command": "ls"})
         relay, ctx = Relay(reg), RecordingContext()
-        task = BrokenGreetingTask(ctx)
-        try:
-            await start_session(relay, task, ctx)
-        except AttributeError:
-            pass
-        return relay, task, q
+        task = FakeTask(ctx)
+        await start_session(relay, task, ctx)
+        return task, q
 
-    relay, task, q = run(go())
-    assert relay._task is task
-    assert any(f"question_id={q})" in m.get("content", "") for m in task.ctx.msgs)  # still spoken
+    task, q = run(go())
+    assert any(f"question_id={q})" in m.get("content", "") for m in task.ctx.msgs)
 
 
 def _raise_one(relay, reg):
@@ -383,3 +372,182 @@ def test_bridge_tools_are_declared_async_so_barge_in_never_cancels_them():
     reg, relay, task, ctx, bridge = setup()
     for fn in make_bridge_tools(bridge, relay, reg, FakeBackend()):
         assert fn._pipecat_cancel_on_interruption is False, fn.__name__
+
+
+def test_a_question_wakes_the_assistant_before_it_is_spoken():
+    async def go():
+        reg, relay, task, ctx, bridge = setup("hi")
+        order = []
+        relay.on_question = lambda: order.append("woke")
+        orig = task.queue_frames
+
+        async def spy(frames):
+            order.append("spoken")
+            await orig(frames)
+
+        task.queue_frames = spy
+        q = _raise_one(relay, reg)
+        await relay.raise_question(q)
+        return order
+
+    assert run(go()) == ["woke", "spoken"]
+
+
+def test_a_failing_wake_callback_must_not_stop_the_question():
+    async def go():
+        reg, relay, task, ctx, bridge = setup("hi")
+
+        def boom():
+            raise RuntimeError("wake exploded")
+
+        relay.on_question = boom
+        q1 = _raise_one(relay, reg)
+        await relay.raise_question(q1)
+        n1 = sum("question_id=" in m.get("content", "") for m in task.ctx.msgs)
+        q2 = reg.add_question("s1", "permission", "pwd", "Bash", {"command": "pwd"})
+        await relay.raise_question(q2)
+        relay.question_closed(q1)
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        return n1, f"question_id={q2})" in str([m.get("content", "") for m in task.ctx.msgs])
+
+    assert run(go()) == (1, True)
+
+
+def test_an_old_session_finishing_late_does_not_detach_the_new_one():
+    async def go():
+        reg, relay, old, ctx, bridge = setup("hi")
+        new = FakeTask(ctx)
+        relay.attach(new, ctx)  # fast reconnect: the new session attaches first
+        relay.detach(old)  # then the old pipeline's on_pipeline_finished lands
+        q = reg.add_question("s1", "permission", "ls", "Bash", {"command": "ls"})
+        await relay.raise_question(q)
+        return new
+
+    assert len(run(go()).frames) == 1
+
+
+def test_asking_is_true_from_speaking_a_question_until_it_is_closed():
+    async def go():
+        reg, relay, task, ctx, bridge = setup("hi")
+        q = reg.add_question("s1", "permission", "ls", "Bash", {"command": "ls"})
+        before = relay.asking
+        await relay.raise_question(q)
+        during = relay.asking
+        reg.resolve_question(q, "answered", "allow")
+        relay.question_closed(q)
+        return before, during, relay.asking
+
+    assert run(go()) == (False, True, False)
+
+
+def test_a_question_asked_just_before_a_reconnect_is_asked_again_in_the_new_session():
+    async def go():
+        reg, relay, old, ctx, bridge = setup("hi")
+        q = reg.add_question("s1", "permission", "ls", "Bash", {"command": "ls"})
+        await relay.raise_question(q)  # spoken in the old session, then the orb drops
+        new = FakeTask(ctx)
+        await relay.attach_and_pump(new, ctx)
+        relay.detach(old)  # the old pipeline finishes after the new one attached
+        return new, q
+
+    new, q = run(go())
+    assert len(new.frames) == 1 and f"question_id={q}" in new.frames[0].messages[0]["content"]
+
+
+def test_reattaching_the_same_session_does_not_ask_the_waiting_question_twice():
+    # SmallWebRTC fires on_client_connected again on an in-session ICE restart.
+    async def go():
+        reg, relay, task, ctx, bridge = setup("hi")
+        q = reg.add_question("s1", "permission", "ls", "Bash", {"command": "ls"})
+        await relay.raise_question(q)
+        await relay.attach_and_pump(task, ctx)
+        return task
+
+    assert len(run(go()).frames) == 1
+
+
+def test_a_yes_to_a_later_unrelated_question_does_not_approve():
+    # The user changes the subject; the assistant asks its own question; "yes" answers that one.
+    async def go():
+        reg, relay, task, ctx, bridge = setup("hi")
+        q = reg.add_question("s1", "permission", "edit", "Edit", {"file_path": "~/.bashrc"})
+        fut = asyncio.get_running_loop().create_future()
+        bridge._waiters[q] = fut
+        await relay.raise_question(q)
+        answer = make_bridge_tools(bridge, relay, reg, FakeBackend())[0]
+        ctx.msgs += [{"role": "assistant", "content": "Claude wants to edit your bashrc. Okay?"},
+                     {"role": "user", "content": "what time is it"},
+                     {"role": "assistant", "content": "It's 3pm. Want a reminder?"},
+                     {"role": "user", "content": "yes"}]
+        p, out = params(ctx)
+        await answer(p, q)
+        await asyncio.sleep(0.01)
+        return out, fut, task
+
+    out, fut, task = run(go())
+    assert out[-1]["status"] == "unclear" and not fut.done()
+    assert len(task.frames) == 2  # asked again, so a fresh answer is needed
+
+
+def test_a_question_that_expired_unanswered_is_reported_to_the_user():
+    async def go():
+        reg, relay, task, ctx, bridge = setup("hi")
+        q = reg.add_question("s1", "permission", "edit ~/.bashrc", "Edit", {"file_path": "~/.bashrc"})
+        await relay.raise_question(q)
+        reg.resolve_question(q, "expired", None)
+        relay.question_closed(q, expired=True)
+        await asyncio.sleep(0.01)
+        return task
+
+    task = run(go())
+    note = task.frames[-1].messages[0]["content"]
+    assert len(task.frames) == 2 and "not allowed" in note and "edit ~/.bashrc" in note
+
+
+def test_when_a_second_client_leaves_questions_go_back_to_the_one_still_connected():
+    # The orb is connected; the /client debug page connects, then closes. The orb must still be asked.
+    async def go():
+        reg, relay, orb, ctx, bridge = setup("hi")
+        page = FakeTask(ctx)
+        await relay.attach_and_pump(page, ctx)
+        relay.detach(page)
+        await asyncio.sleep(0.01)
+        q = reg.add_question("s1", "permission", "ls", "Bash", {"command": "ls"})
+        await relay.raise_question(q)
+        return orb, page
+
+    orb, page = run(go())
+    assert len(orb.frames) == 1 and page.frames == []
+
+
+def test_stop_session_with_a_blank_or_ambiguous_id_stops_nothing():
+    async def go():
+        reg, relay, task, ctx, bridge = setup("hi")
+        reg.upsert_session("s2", origin="delegated")
+        backend = FakeBackend()
+        stop = make_bridge_tools(bridge, relay, reg, backend)[2]
+        p, out = params(ctx)
+        await stop(p, "")
+        await stop(p, "s")  # matches s1 and s2
+        return out, backend
+
+    out, backend = run(go())
+    assert [o["status"] for o in out] == ["not_running", "not_running"] and backend.stopped == []
+
+
+def test_each_session_wakes_its_own_orb_when_a_question_comes():
+    # After the /client page leaves, the orb's session is re-attached: its own wake must fire, not the page's.
+    async def go():
+        reg, relay, orb, ctx, bridge = setup("hi")
+        woke = []
+        await relay.attach_and_pump(orb, ctx, lambda: woke.append("orb"))
+        page = FakeTask(ctx)
+        await relay.attach_and_pump(page, ctx, lambda: woke.append("page"))
+        relay.detach(page)
+        await asyncio.sleep(0.01)
+        q = reg.add_question("s1", "permission", "ls", "Bash", {"command": "ls"})
+        await relay.raise_question(q)
+        return woke
+
+    assert run(go()) == ["orb"]

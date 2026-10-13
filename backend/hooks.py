@@ -4,6 +4,7 @@ import asyncio
 import hmac
 import json
 import os
+import re
 import secrets
 from pathlib import Path
 
@@ -24,8 +25,9 @@ def hook_response(decision):
 
 
 def describe(tool_name, tool_input):
-    inp = tool_input or {}
-    detail = inp.get("command") or inp.get("file_path") or inp.get("path") or json.dumps(inp)[:200]
+    inp = tool_input if isinstance(tool_input, dict) else {"input": tool_input}
+    detail = (inp.get("command") or inp.get("file_path") or inp.get("path") or inp.get("url")
+              or inp.get("query") or json.dumps(inp, default=str)[:200])
     return f"{tool_name}: {detail}"
 
 
@@ -50,6 +52,7 @@ class HookBridge:
 
     async def on_permission_request(self, p):
         sid = p["session_id"]
+        logger.info(f"hook PermissionRequest ({sid[:8]})")
         self.reg.upsert_session(sid, cwd=p.get("cwd"))
         self.reg.add_event(sid, "PermissionRequest", p)
         qid = self.reg.add_question(sid, "permission", describe(p.get("tool_name"), p.get("tool_input")),
@@ -57,6 +60,7 @@ class HookBridge:
         fut = self._waiters.get(qid)
         first = fut is None
         decision = None
+        timed_out = False
         try:
             if first:
                 fut = self._waiters[qid] = asyncio.get_running_loop().create_future()
@@ -64,7 +68,7 @@ class HookBridge:
                 await self.relay.raise_question(qid)
             decision = await asyncio.wait_for(asyncio.shield(fut), self.timeout)
         except asyncio.TimeoutError:
-            decision = None
+            decision, timed_out = None, True
         finally:  # also runs on cancellation or a relay failure: never leave a zombie question
             if first:  # only the first delivery closes the question
                 self._waiters.pop(qid, None)
@@ -72,7 +76,7 @@ class HookBridge:
                 s = self.reg.get_session(sid)
                 if s and s["state"] == "waiting_input":  # do not resurrect an ended session
                     self.reg.set_state(sid, "running")
-                self.relay.question_closed(qid)
+                self.relay.question_closed(qid, expired=timed_out)
                 if not fut.done():
                     fut.set_result(decision)
         return hook_response(decision)
@@ -97,7 +101,7 @@ def make_router(bridge, token):
 
     @router.post("/hook/{tok}/{event}")
     async def hook(tok: str, event: str, request: Request):
-        if not hmac.compare_digest(tok, token):
+        if not hmac.compare_digest(tok.encode(), token.encode()):  # str form raises on non-ASCII
             raise HTTPException(status_code=404)
         try:
             payload = await request.json()
@@ -115,13 +119,20 @@ def make_router(bridge, token):
 
 
 def hide_hook_tokens(record):
-    """Logging filter for uvicorn's access log: hook URLs carry the secret token."""
-    return "/hook/" not in record.getMessage()
+    """Logging filter for uvicorn's access log: keep hook calls (a refused one must be visible) but
+    blank out the secret token in their URL."""
+    if isinstance(record.args, tuple):
+        record.args = tuple(re.sub(r"/hook/[^/]+/", "/hook/…/", a) if isinstance(a, str) else a
+                            for a in record.args)
+    elif "/hook/" in str(record.msg):
+        record.msg = re.sub(r"/hook/[^/]+/", "/hook/…/", str(record.msg))
+    return True
 
 
 def load_token(path):
     p = Path(path)
     if p.exists():
+        p.chmod(0o600)  # someone may have loosened it
         return p.read_text().strip()
     p.parent.mkdir(parents=True, exist_ok=True)
     tok = secrets.token_urlsafe(32)

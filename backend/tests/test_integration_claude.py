@@ -7,7 +7,7 @@ import pytest
 import uvicorn
 from fastapi import FastAPI
 
-from backend import ClaudeCodeBackend
+from claude_cli import ClaudeCodeBackend
 from hooks import HookBridge, make_router, write_run_settings
 from registry import Registry
 
@@ -21,7 +21,7 @@ class AutoRelay:
     async def raise_question(self, qid):
         asyncio.get_running_loop().call_soon(self.h["bridge"].resolve, qid, self.decision)
 
-    def question_closed(self, qid):
+    def question_closed(self, qid, expired=False):
         pass
 
 
@@ -102,7 +102,8 @@ def test_autonomy_shell_runs_unprompted_in_the_folder_and_cannot_write_outside(t
             tmp_path, port,
             f"Run these two shell commands one at a time and tell me whether each worked: "
             f"1) echo ok > made.txt   2) touch {outside}",
-            sandbox_settings(Path.home(), Path(__file__).parent.parent, tmp_path / "data"))
+            sandbox_settings(Path.home(), Path(__file__).resolve().parent.parent.parent, tmp_path / "data",
+                             hook_port=port))
     finally:
         server.should_exit = True
         made_outside = outside.exists()
@@ -110,6 +111,7 @@ def test_autonomy_shell_runs_unprompted_in_the_folder_and_cannot_write_outside(t
     assert (work / "made.txt").exists()  # sandboxed shell inside the task folder: autonomous
     assert not made_outside  # the sandbox blocks writes outside it
     assert reg.open_questions() == [] and reg.get_question(1) is None  # and nothing needed a human
+    assert reg.list_sessions(), "no hook reached the app: under the sandbox they were refused (HTTP 403)"
 
 
 def test_secret_deny_rule_stops_the_file_tool_even_in_auto_mode(tmp_path):
@@ -119,7 +121,7 @@ def test_secret_deny_rule_stops_the_file_tool_even_in_auto_mode(tmp_path):
 
     canary = Path.home() / ".vi_canary_test.txt"
     canary.write_text("CANARY-SECRET-123\n")
-    extra = sandbox_settings(Path.home(), Path(__file__).parent.parent, tmp_path / "data")
+    extra = sandbox_settings(Path.home(), Path(__file__).resolve().parent.parent.parent, tmp_path / "data")
     extra["permissions"]["deny"].append("Read(~/.vi_canary_test.txt)")
     extra["sandbox"]["filesystem"]["denyRead"].append("~/.vi_canary_test.txt")
     server, reg, port = serve("deny")
@@ -129,3 +131,24 @@ def test_secret_deny_rule_stops_the_file_tool_even_in_auto_mode(tmp_path):
         server.should_exit = True
         canary.unlink(missing_ok=True)
     assert "CANARY-SECRET-123" not in r.text
+
+
+def test_a_permission_question_reaches_the_app_through_the_sandbox(tmp_path):
+    # The product runs Claude sandboxed; its hooks must still get through to ask the user.
+    from pathlib import Path
+
+    from autonomy import sandbox_settings
+
+    server, reg, port = serve("allow")
+    try:
+        settings = write_run_settings(tmp_path / "s", "sid", "tok", port, extra=sandbox_settings(
+            Path.home(), Path(__file__).resolve().parent.parent.parent, tmp_path / "data", hook_port=port))
+        work = tmp_path / "work"
+        work.mkdir()
+        b = ClaudeCodeBackend(cwd=str(work), timeout=150, permission_mode="default")
+        asyncio.run(b.run("Use the Write tool to create notes.txt containing hi.", settings=settings))
+    finally:
+        server.should_exit = True
+    q = reg.get_question(1)
+    assert q is not None and q["tool_name"] == "Write"  # asked through the relay, not refused by the proxy
+    assert (work / "notes.txt").exists()

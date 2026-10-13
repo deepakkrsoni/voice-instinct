@@ -1,6 +1,7 @@
 """Pipecat services: local Parakeet STT (no built-in one exists) and the front-LLM builder."""
 
 import asyncio
+import functools
 import os
 from collections.abc import AsyncGenerator
 from pathlib import Path
@@ -16,9 +17,19 @@ from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 
-PARAKEET_DIR = Path.home() / ".local/share/parakeet-dictation/models/desktop"
+PARAKEET_NAME = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
 
 
+def parakeet_dir(cfg) -> Path:
+    return Path(cfg.models_dir).expanduser() / PARAKEET_NAME
+
+
+def kokoro_paths(cfg) -> tuple[Path, Path]:
+    d = Path(cfg.models_dir).expanduser() / "kokoro"
+    return d / "kokoro-v1.0.onnx", d / "voices-v1.0.bin"
+
+
+@functools.cache  # one copy for every session: reconnects must not load the model again
 def _load_recognizer(model_dir: Path):
     import sherpa_onnx
 
@@ -44,7 +55,7 @@ class ParakeetSTTService(SegmentedSTTService):
     # cache-aware model if STT latency dominates.
     wants_wav_segments = False
 
-    def __init__(self, model_dir: Path = PARAKEET_DIR, recognizer=None, **kwargs):
+    def __init__(self, model_dir: Path | None = None, recognizer=None, **kwargs):
         super().__init__(
             sample_rate=16000,
             settings=STTSettings(model="parakeet-tdt-0.6b-v3", language=Language.EN),
@@ -66,8 +77,7 @@ class ParakeetSTTService(SegmentedSTTService):
         await self.start_processing_metrics()
         text = await asyncio.to_thread(self._decode, audio)
         await self.stop_processing_metrics()
-        if text:
-            logger.info(f"User: {text}")
+        if text:  # never logged: until the wake phrase this is whatever the room is saying
             yield TranscriptionFrame(text, self._user_id, time_now_iso8601())
 
 
