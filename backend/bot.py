@@ -8,7 +8,9 @@ from pathlib import Path
 from dotenv import load_dotenv
 from loguru import logger
 
-from autonomy import sandbox_settings
+import json
+
+from autonomy import browser_mcp, sandbox_settings
 from claude_cli import ClaudeCodeBackend
 from config import REPO_ROOT, load
 from delegate import make_tools
@@ -78,6 +80,16 @@ SYSTEM_PROMPT = (
     "result says done."
 )
 
+def _browser_config():
+    """Path of the errand browser's MCP config, or None if install.sh has not set the browser up."""
+    servers = browser_mcp(Path.home())
+    if servers is None:
+        return None
+    path = DATA / "browser-mcp.json"
+    path.write_text(json.dumps(servers))
+    return str(path)
+
+
 HOOK_PORT = 7860  # the runner's port: hooks post back to this same server
 
 NO_AGENT = (
@@ -98,7 +110,7 @@ async def bot(runner_args: RunnerArguments):
     stt = ParakeetSTTService(model_dir=parakeet_dir(cfg))
     backend = ClaudeCodeBackend(cmd=os.environ.get("VI_CLAUDE", "claude"), cwd=cfg.backend_cwd,
                                 timeout=cfg.backend_timeout, permission_mode=cfg.permission_mode,
-                                hide_env=(cfg.api_key_env,))
+                                hide_env=(cfg.api_key_env,), mcp_config=_browser_config())
     llm = build_llm(cfg, SYSTEM_PROMPT if backend.available() else SYSTEM_PROMPT + NO_AGENT)
     tools = []
     if backend.available():

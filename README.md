@@ -39,6 +39,8 @@ Built on [Pipecat](https://docs.pipecat.ai).
   fail closed if the sandbox is unavailable.
 - Your secrets (`~/.ssh`, cloud credentials, this app's keys and database) are off limits to the agent,
   and the front model's API key is removed from the agent's environment.
+- The agent browses in its own headless browser that starts empty for every errand and is never
+  signed in to your accounts. It gets none of your other Claude Code tools or connectors.
 - Your yes or no is decided by code from your own words, never by the model, and only after it
   actually asked you.
 - It is instructed never to buy, pay, book or cancel without your explicit go-ahead.

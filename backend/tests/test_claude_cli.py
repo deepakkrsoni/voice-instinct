@@ -177,3 +177,9 @@ def test_the_agent_gets_none_of_the_users_own_mcp_servers(tmp_path):
     # Slack, Drive, messaging. An errand agent reading untrusted pages must not reach any of them.
     cli = _script(tmp_path, 'printf \'{"type":"result","result":"%s"}\\n\' "$*"\n')
     assert "--strict-mcp-config" in asyncio.run(ClaudeCodeBackend(cmd=cli).run("t")).text
+
+
+def test_the_errand_browser_is_the_only_mcp_server_given(tmp_path):
+    cli = _script(tmp_path, 'printf \'{"type":"result","result":"%s"}\\n\' "$*"\n')
+    args = asyncio.run(ClaudeCodeBackend(cmd=cli, mcp_config="/vi/browser-mcp.json").run("t")).text
+    assert "--strict-mcp-config" in args and "--mcp-config /vi/browser-mcp.json" in args

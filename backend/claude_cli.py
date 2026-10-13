@@ -59,10 +59,12 @@ def _kill_group(proc) -> None:
 
 class ClaudeCodeBackend:
     def __init__(self, cmd: str = "claude", cwd: str | None = None, timeout: float = 120,
-                 permission_mode: str | None = "acceptEdits", hide_env: Iterable[str] = ()):
+                 permission_mode: str | None = "acceptEdits", hide_env: Iterable[str] = (),
+                 mcp_config: str | None = None):
         # acceptEdits: file edits inside the task's own folder don't prompt; shell commands still do.
         self.cmd, self.cwd, self.timeout, self.permission_mode = cmd, cwd, timeout, permission_mode
         self.hide_env = tuple(hide_env)  # e.g. the front model's api_key_env, whatever it is called
+        self.mcp_config = mcp_config  # the only MCP servers the agent gets (the errand browser)
         self._procs: dict[str, asyncio.subprocess.Process] = {}
         self._stopped: set[str] = set()
 
@@ -92,6 +94,8 @@ class ClaudeCodeBackend:
         args = [self.cmd, "-p", "--output-format", "stream-json", "--verbose",
                 "--allowedTools", tools,
                 "--strict-mcp-config"]  # none of the user's own MCP servers (their browsers, Slack, mail)
+        if self.mcp_config:
+            args += ["--mcp-config", self.mcp_config]
         if session_id:
             args += ["--resume" if resume else "--session-id", session_id]
         if settings:

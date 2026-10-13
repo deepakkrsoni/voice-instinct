@@ -220,6 +220,10 @@ config_and_key
 run sh -c "cd '$REPO/backend' && $UV sync --python 3.13"
 # npm 12 blocks install scripts, so fetch the Electron binary explicitly (harmless where npm already did)
 run sh -c "export PATH=\"$NODE_DIR/bin:\$PATH\"; cd '$REPO/frontend' && npm ci && node node_modules/electron/install.js && npm run build"
+# The errand browser: Playwright MCP (pinned; npm checks the registry's integrity hashes) and its Chromium.
+# The agent gets a fresh in-memory profile each run, never signed in to anything (backend/autonomy.py).
+BROWSER_DIR="$HOME_DIR/.voice-instinct/browser"
+run sh -c "export PATH=\"$NODE_DIR/bin:\$PATH\"; npm install --prefix '$BROWSER_DIR' --no-audit --no-fund @playwright/mcp@0.0.83 && node '$BROWSER_DIR/node_modules/playwright/cli.js' install chromium"
 # Ubuntu 24.04+ (AppArmor) blocks unprivileged user namespaces; Electron then needs its SUID sandbox helper.
 if [ "$(cat "${VI_USERNS_FILE:-/proc/sys/kernel/apparmor_restrict_unprivileged_userns}" 2>/dev/null)" = 1 ]; then
   helper="$REPO/frontend/node_modules/electron/dist/chrome-sandbox"

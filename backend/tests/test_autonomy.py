@@ -52,3 +52,20 @@ def test_the_sandbox_lets_hooks_reach_this_app_and_nothing_else_local():
     # Claude Code's sandbox proxy refuses loopback unless it is listed: hooks got HTTP 403 without this.
     net = sandbox_settings(HOME, APP, DATA, hook_port=7860)["sandbox"]["network"]
     assert net["allowedDomains"] == ["127.0.0.1:7860"]
+
+
+def test_errand_browser_is_private_and_only_offered_once_installed(tmp_path):
+    from autonomy import browser_mcp
+
+    assert browser_mcp(tmp_path) is None  # not installed: the agent gets no browser at all
+    vi = tmp_path / ".voice-instinct"
+    (vi / "node/bin").mkdir(parents=True)
+    (vi / "node/bin/node").write_text("")
+    cli = vi / "browser/node_modules/@playwright/mcp/cli.js"
+    cli.parent.mkdir(parents=True)
+    cli.write_text("")
+    server = browser_mcp(tmp_path)["mcpServers"]["browser"]
+    assert server["command"] == str(vi / "node/bin/node") and server["args"][0] == str(cli)
+    # A fresh in-memory profile each run: never signed in to anything, nothing kept on disk.
+    assert "--isolated" in server["args"] and "--headless" in server["args"]
+    assert "--user-data-dir" not in server["args"]

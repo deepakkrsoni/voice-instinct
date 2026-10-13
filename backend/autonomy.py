@@ -51,3 +51,17 @@ def sandbox_settings(home, app_dir, data_dir, hook_port=7860) -> dict:
         },
         "permissions": {"deny": deny},
     }
+
+
+def browser_mcp(home):
+    """The errand browser for --mcp-config, or None until install.sh has set it up.
+
+    Playwright MCP on the installer's own Node, headless, with a fresh in-memory profile each run
+    (--isolated): it is never signed in to the user's accounts and keeps nothing on disk.
+    """
+    vi = Path(home) / ".voice-instinct"
+    node, cli = vi / "node/bin/node", vi / "browser/node_modules/@playwright/mcp/cli.js"
+    if not (node.exists() and cli.exists()):
+        return None
+    return {"mcpServers": {"browser": {"type": "stdio", "command": str(node),
+                                       "args": [str(cli), "--browser", "chromium", "--headless", "--isolated"]}}}

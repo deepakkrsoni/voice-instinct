@@ -111,7 +111,8 @@ def test_debian_and_fedora_use_their_package_managers(tmp_path):
     f = run(tmp_path, "fedora", "--dry-run")[0].stdout
     assert "apt-get install -y bubblewrap socat curl tar bzip2 xz-utils" in d
     assert "dnf install -y bubblewrap socat curl tar bzip2 xz" in f
-    assert "nodejs" not in d.replace("nodejs.org", "") and "npm install" not in d
+    apt = next(l for l in d.splitlines() if "apt-get install" in l)
+    assert "nodejs" not in apt and "npm" not in apt  # the distro's Node is too old; ours is pinned
 
 
 def fake_uname(tmp_path, machine):
@@ -318,3 +319,9 @@ def test_uninstall_quits_the_running_orb_first(tmp_path):
 def test_gnome_is_told_the_tray_needs_the_appindicator_extension(tmp_path):
     r, _ = run_clean(tmp_path, "--dry-run", extra_env={"XDG_CURRENT_DESKTOP": "ubuntu:GNOME", "SWAYSOCK": ""})
     assert "AppIndicator" in r.stdout and "voice-instinct quit" in r.stdout
+
+
+def test_install_sets_up_the_pinned_errand_browser(tmp_path):
+    r, home = run_clean(tmp_path, "--dry-run")
+    assert "@playwright/mcp@0.0.83" in r.stdout and f"{home}/.voice-instinct/browser" in r.stdout
+    assert "install chromium" in r.stdout
