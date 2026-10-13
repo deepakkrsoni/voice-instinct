@@ -34,7 +34,11 @@ client.on(RTVIEvent.TrackStarted, (track, participant) => {
   if (participant?.local && track.kind === "audio" && micError) { micError = null; dispatch("mic-ok"); }
 });
 // A stalled session (media stopped without a Disconnected) is torn down so the reconnector takes over.
-const watchdog = makeWatchdog(() => { console.warn("session stalled; reconnecting"); client.disconnect(); });
+// disconnect() emits no Disconnected when the peer is already gone, so trigger the reconnector here.
+const watchdog = makeWatchdog(() => {
+  console.warn("session stalled; reconnecting");
+  client.disconnect().catch(() => {}).then(() => reconnector.trigger());
+});
 client.on(RTVIEvent.TransportStateChanged, (s) => watchdog.state(s));
 client.on(RTVIEvent.UserStartedSpeaking, () => dispatch("user-start"));
 client.on(RTVIEvent.UserStoppedSpeaking, () => dispatch("user-stop"));

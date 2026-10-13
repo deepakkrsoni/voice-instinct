@@ -6,6 +6,7 @@ const os = require("node:os");
 const { trayItems } = require("./tray.js");
 
 const BACKEND = "http://127.0.0.1:7860"; // the page's CSP allows only this backend
+const ORB_ORIGIN = "http://orb.invalid"; // same as backend/guard.py
 const DEFAULTS = { name: "Nova", size: 128, position: "top-right" }; // same as backend/config.py
 app.setName("voice-instinct"); // Wayland app_id / X11 class, used by compositor window rules
 
@@ -18,8 +19,10 @@ if (!app.requestSingleInstanceLock() || process.argv.includes("--quit")) {
 // The page's console (connection events, errors; never what was said) goes to a file, so a dead or
 // stalled orb can be diagnosed. Started fresh once it passes 1 MB.
 const LOG = path.join(os.homedir(), ".voice-instinct", "frontend.log");
-try { if (fs.statSync(LOG).size > 1e6) fs.truncateSync(LOG); } catch {}
-const log = (line) => fs.appendFile(LOG, `${new Date().toISOString()} ${line}\n`, { mode: 0o600 }, () => {});
+const log = (line) => {
+  try { if (fs.statSync(LOG).size > 1e6) fs.truncateSync(LOG); } catch {}
+  fs.appendFile(LOG, `${new Date().toISOString()} ${line}\n`, { mode: 0o600 }, () => {});
+};
 
 let win = null;
 let tray = null;
@@ -69,8 +72,11 @@ function createWindow() {
   win.setAlwaysOnTop(true, "floating");
   win.webContents.on("console-message", (e) => log(`[${e.level}] ${e.message}`));
   // A crashed or frozen page cannot reconnect itself: reload it (it reconnects on load).
-  win.webContents.on("render-process-gone", (_e, d) => { log(`page gone: ${d.reason}; reloading`); win.reload(); });
-  win.webContents.on("unresponsive", () => { log("page unresponsive; reloading"); win.webContents.forcefullyCrashRenderer(); win.reload(); });
+  win.webContents.on("render-process-gone", (_e, d) => {
+    log(`page gone: ${d.reason}`);
+    if (d.reason !== "clean-exit" && !win.isDestroyed()) setTimeout(() => win.reload(), 1000); // no tight crash loop
+  });
+  win.webContents.on("unresponsive", () => { log("page unresponsive; restarting it"); win.webContents.forcefullyCrashRenderer(); });
   win.webContents.on("did-finish-load", () => {
     win.webContents.send("mute", muted); // page reloads forget it
     loaded = true;
@@ -93,6 +99,20 @@ app.on("second-instance", (_event, argv) => {
 
 app.whenReady().then(async () => {
   // Only the microphone, only for our own page.
+  // Our page's requests to the backend carry an origin no web page can have (backend/guard.py):
+  // page scripts cannot set Origin, and ".invalid" never resolves. The page's real origin is the
+  // opaque "null", so the CORS answer is matched back to it.
+  const toBackend = { urls: [`${BACKEND}/*`] };
+  session.defaultSession.webRequest.onBeforeSendHeaders(toBackend, (d, cb) => {
+    d.requestHeaders.Origin = ORB_ORIGIN;
+    cb({ requestHeaders: d.requestHeaders });
+  });
+  session.defaultSession.webRequest.onHeadersReceived(toBackend, (d, cb) => {
+    const h = { ...d.responseHeaders };
+    for (const k of Object.keys(h)) if (k.toLowerCase() === "access-control-allow-origin") delete h[k];
+    h["Access-Control-Allow-Origin"] = ["null"];
+    cb({ responseHeaders: h });
+  });
   const ours = (wc) => wc === win?.webContents;
   const micOnly = (types) => !types || types.every((t) => t === "audio");
   session.defaultSession.setPermissionRequestHandler((wc, permission, cb, details) =>

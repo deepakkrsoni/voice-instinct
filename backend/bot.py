@@ -165,7 +165,7 @@ async def bot(runner_args: RunnerArguments):
         idle_timeout_secs=None,
         # Documented RTVI observer params: the orb never needs what was said, and before the wake
         # phrase that is the room's conversation; keep it off the data channel too.
-        rtvi_observer_params=RTVIObserverParams(user_transcription_enabled=False),
+        rtvi_observer_params=RTVIObserverParams(user_transcription_enabled=False, user_llm_enabled=False),
     )
     holder["worker"] = worker
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
