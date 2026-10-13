@@ -178,7 +178,7 @@ command -v uv >/dev/null || run sh -c "curl -LsSf https://astral.sh/uv/install.s
 UV="$(command -v uv || echo "$HOME_DIR/.local/bin/uv")"  # the fresh install is not on PATH yet
 models
 config_and_key
-run sh -c "cd '$REPO/backend' && $UV sync"
+run sh -c "cd '$REPO/backend' && $UV sync --python 3.13"
 # npm 12 blocks install scripts, so fetch the Electron binary explicitly (harmless where npm already did)
 run sh -c "cd '$REPO/frontend' && npm ci && node node_modules/electron/install.js && npm run build"
 if ! command -v claude >/dev/null; then

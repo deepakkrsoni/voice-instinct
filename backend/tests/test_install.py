@@ -100,7 +100,7 @@ def test_dry_run_on_arch_plans_everything_and_changes_nothing(tmp_path):
     out = r.stdout
     assert "pacman -S --needed bubblewrap socat nodejs npm curl tar bzip2" in out
     assert "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2" in out and "kokoro-v1.0.onnx" in out
-    assert "uv sync" in out and "npm ci" in out
+    assert "uv sync --python 3.13" in out and "npm ci" in out  # unpinned, uv picks 3.15 on a clean box: no onnxruntime wheels
     assert "electron/install.js" in out  # npm 12 skips install scripts, so fetch the binary explicitly
     assert "voice-instinct.service" in out and "voice-instinct.desktop" in out
     assert list(home.iterdir()) == []  # a dry run creates nothing
