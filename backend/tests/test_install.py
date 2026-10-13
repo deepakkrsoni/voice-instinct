@@ -98,7 +98,7 @@ def test_dry_run_on_arch_plans_everything_and_changes_nothing(tmp_path):
     r, home = run(tmp_path, "arch", "--dry-run")
     assert r.returncode == 0, r.stderr
     out = r.stdout
-    assert "pacman -S --needed bubblewrap socat nodejs npm curl tar bzip2" in out
+    assert "pacman -S --needed bubblewrap socat curl tar bzip2 xz" in out and "nodejs" not in out.split("System packages")[1].split("\n")[0]
     assert "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2" in out and "kokoro-v1.0.onnx" in out
     assert "uv sync --python 3.13" in out and "npm ci" in out  # unpinned, uv picks 3.15 on a clean box: no onnxruntime wheels
     assert "electron/install.js" in out  # npm 12 skips install scripts, so fetch the binary explicitly
@@ -107,8 +107,34 @@ def test_dry_run_on_arch_plans_everything_and_changes_nothing(tmp_path):
 
 
 def test_debian_and_fedora_use_their_package_managers(tmp_path):
-    assert "apt-get install -y bubblewrap socat nodejs npm" in run(tmp_path, "debian", "--dry-run")[0].stdout
-    assert "dnf install -y bubblewrap socat nodejs npm" in run(tmp_path, "fedora", "--dry-run")[0].stdout
+    d = run(tmp_path, "debian", "--dry-run")[0].stdout
+    f = run(tmp_path, "fedora", "--dry-run")[0].stdout
+    assert "apt-get install -y bubblewrap socat curl tar bzip2 xz-utils" in d
+    assert "dnf install -y bubblewrap socat curl tar bzip2 xz" in f
+    assert "nodejs" not in d.replace("nodejs.org", "") and "npm install" not in d
+
+
+def fake_uname(tmp_path, machine):
+    bin_ = tmp_path / "fakebin"
+    bin_.mkdir(exist_ok=True)
+    (bin_ / "uname").write_text(f"#!/bin/sh\necho {machine}\n")
+    (bin_ / "uname").chmod(0o755)
+    return {"PATH": f"{bin_}:{os.environ['PATH']}"}
+
+
+@pytest.mark.parametrize("machine,arch", [("x86_64", "x64"), ("aarch64", "arm64")])
+def test_pinned_node_is_downloaded_for_the_arch(tmp_path, machine, arch):
+    r, _ = run_clean(tmp_path, "--dry-run", extra_env=fake_uname(tmp_path, machine))
+    assert r.returncode == 0, r.stderr
+    assert f"https://nodejs.org/dist/v22.23.3/node-v22.23.3-linux-{arch}.tar.xz" in r.stdout
+    assert "tar -xJf" in r.stdout
+    assert 'PATH="' in r.stdout and "/.voice-instinct/node" in r.stdout and "npm ci" in r.stdout
+
+
+def test_unsupported_cpu_stops_before_any_package_step(tmp_path):
+    r, _ = run_clean(tmp_path, "--dry-run", extra_env=fake_uname(tmp_path, "riscv64"))
+    assert r.returncode != 0 and "unsupported CPU" in (r.stdout + r.stderr)
+    assert "pacman" not in r.stdout
 
 
 def test_unsupported_distro_stops_before_any_change(tmp_path):

@@ -16,7 +16,14 @@ for arg in "$@"; do
   esac
 done
 
-PKGS=(bubblewrap socat nodejs npm curl tar bzip2)
+PKGS=(bubblewrap socat curl tar bzip2)
+NODE_VER="22.23.3"  # one pinned official Node: distro Node (Debian 12 has 18) is too old for Electron 44
+NODE_DIR="$HOME_DIR/.voice-instinct/node"
+case "$(uname -m)" in
+  x86_64) NODE_ARCH=x64; NODE_SHA="df450af89261115ef9f9e3830c3eeb2cc9213b63c720b1af623cb5dcbe2e02de" ;;
+  aarch64) NODE_ARCH=arm64; NODE_SHA="a44aeb94849a299b22df10b9e622ec2f605c2183501bc40590705131de7c740f" ;;
+  *) NODE_ARCH="" NODE_SHA="" ;;
+esac
 MODELS="$HOME_DIR/.voice-instinct/models"
 PARAKEET="sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
 PARAKEET_URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/$PARAKEET.tar.bz2"
@@ -42,9 +49,9 @@ distro_install() {
   . "$OS_RELEASE"
   local family="${ID:-} ${ID_LIKE:-}"
   case "$family" in
-    *arch*) PM=(sudo pacman -S --needed "${PKGS[@]}") ;;
-    *debian*|*ubuntu*) PM=(sudo apt-get install -y "${PKGS[@]}") ;;
-    *fedora*|*rhel*) PM=(sudo dnf install -y "${PKGS[@]}") ;;
+    *arch*) PKGS+=(xz); PM=(sudo pacman -S --needed "${PKGS[@]}") ;;
+    *debian*|*ubuntu*) PKGS+=(xz-utils); PM=(sudo apt-get install -y "${PKGS[@]}") ;;
+    *fedora*|*rhel*) PKGS+=(xz); PM=(sudo dnf install -y "${PKGS[@]}") ;;
     *) echo "Your distribution (${NAME:-unknown}) is not supported yet. Supported: Arch, Debian/Ubuntu, Fedora." >&2
        echo "Install these yourself, then re-run: ${PKGS[*]}" >&2; exit 1 ;;
   esac
@@ -65,6 +72,16 @@ fetch() { # fetch <url> <dest> <sha256>
     if [ "$(sha256sum "$dest.part" | cut -d' ' -f1)" != "$sha" ]; then rm -f "$dest.part"; echo "Checksum mismatch for $url" >&2; exit 1; fi
     mv "$dest.part" "$dest"
   fi
+}
+
+node_install() {
+  if [ "$("$NODE_DIR/bin/node" --version 2>/dev/null)" = "v$NODE_VER" ]; then say "keep Node v$NODE_VER"; return; fi
+  local tgz="$HOME_DIR/.voice-instinct/node-v$NODE_VER-linux-$NODE_ARCH.tar.xz"
+  fetch "https://nodejs.org/dist/v$NODE_VER/node-v$NODE_VER-linux-$NODE_ARCH.tar.xz" "$tgz" "$NODE_SHA"
+  run rm -rf "$NODE_DIR"
+  run mkdir -p "$NODE_DIR"
+  run tar -xJf "$tgz" -C "$NODE_DIR" --strip-components=1
+  run rm -f "$tgz"
 }
 
 models() {
@@ -173,14 +190,16 @@ uninstall() {
 
 if [ "$UNINSTALL" = 1 ]; then uninstall; exit 0; fi
 
+if [ -z "$NODE_ARCH" ]; then echo "unsupported CPU: $(uname -m) (supported: x86_64, aarch64)" >&2; exit 1; fi
 distro_install
+node_install
 command -v uv >/dev/null || run sh -c "curl -LsSf https://astral.sh/uv/install.sh | sh"
 UV="$(command -v uv || echo "$HOME_DIR/.local/bin/uv")"  # the fresh install is not on PATH yet
 models
 config_and_key
 run sh -c "cd '$REPO/backend' && $UV sync --python 3.13"
 # npm 12 blocks install scripts, so fetch the Electron binary explicitly (harmless where npm already did)
-run sh -c "cd '$REPO/frontend' && npm ci && node node_modules/electron/install.js && npm run build"
+run sh -c "export PATH=\"$NODE_DIR/bin:\$PATH\"; cd '$REPO/frontend' && npm ci && node node_modules/electron/install.js && npm run build"
 if ! command -v claude >/dev/null; then
   say "Install Claude Code (https://code.claude.com/docs) and log in with 'claude', then re-run this script."
 fi
