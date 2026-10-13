@@ -15,10 +15,12 @@ from claude_cli import ClaudeCodeBackend
 from config import REPO_ROOT, load
 from delegate import make_tools
 from gui import make_gui_router
+from guard import refuse_other_origins
 from hooks import HookBridge, hide_hook_tokens, load_token, make_router, write_run_settings
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
+from pipecat.processors.frameworks.rtvi.observer import RTVIObserverParams
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
@@ -60,7 +62,9 @@ HOOK_TOKEN = load_token(DATA / "hook-token")
 # its FastAPI app, so hooks share the voice page's process, event loop and port.
 app.include_router(make_router(bridge, HOOK_TOKEN))
 app.include_router(make_gui_router(cfg))
+refuse_other_origins(app, port=7860)  # no other web page may open a voice session (guard.py)
 logging.getLogger("uvicorn.access").addFilter(hide_hook_tokens)  # the token is in the URL
+logging.getLogger("phonemizer").setLevel(logging.ERROR)  # Kokoro's espeak warns on every number; noise
 
 SYSTEM_PROMPT = (
     "You are a voice-first personal agent that handles everyday errands for the user, like a "
@@ -159,6 +163,9 @@ async def bot(runner_args: RunnerArguments):
         # Documented default is 5 min, then the session is cancelled: that would kill a running errand
         # and drop "Hey Nova" every few minutes. The app stays connected until it disconnects.
         idle_timeout_secs=None,
+        # Documented RTVI observer params: the orb never needs what was said, and before the wake
+        # phrase that is the room's conversation; keep it off the data channel too.
+        rtvi_observer_params=RTVIObserverParams(user_transcription_enabled=False, user_llm_enabled=False),
     )
     holder["worker"] = worker
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)

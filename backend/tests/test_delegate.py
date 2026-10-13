@@ -238,3 +238,12 @@ def test_an_errand_cancelled_with_its_session_is_recorded_as_aborted():
     run(go())
     rows = reg.db.execute("select status from tasks").fetchall()
     assert [r[0] for r in rows] == ["aborted"]
+
+
+def test_the_result_is_spoken_as_a_short_summary_not_read_out():
+    # A flight list was read aloud for 27 s; a voice assistant gives the gist and offers details.
+    reg, b, delegate = setup([BackendResult("| Airline | Price |\n|---|---|\n| IndiGo | 4,200 |", "s1")])
+    p, out = make_params()
+    run(delegate(p, "flights"))
+    note = out[-1]["note"]
+    assert "two short sentences" in note and "offer" in note and "table" in note

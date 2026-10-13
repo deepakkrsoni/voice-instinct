@@ -152,3 +152,4 @@ def test_a_permission_question_reaches_the_app_through_the_sandbox(tmp_path):
     q = reg.get_question(1)
     assert q is not None and q["tool_name"] == "Write"  # asked through the relay, not refused by the proxy
     assert (work / "notes.txt").exists()
+
