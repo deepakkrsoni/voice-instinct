@@ -48,6 +48,7 @@ async function createWindow() {
     webPreferences: { preload: path.join(__dirname, "preload.js"), contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
   win.setAlwaysOnTop(true, "floating");
+  win.webContents.on("did-finish-load", () => win.webContents.send("mute", muted)); // page reloads forget it
   win.loadFile(path.join(__dirname, "renderer", "index.html"), { query: { backend: BACKEND } });
 }
 

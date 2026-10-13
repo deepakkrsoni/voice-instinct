@@ -4,10 +4,12 @@ import { SmallWebRTCTransport, WavMediaManager } from "@pipecat-ai/small-webrtc-
 import { Orb } from "./orb.js";
 
 const { initial, reduce } = require("./state.js");
+const { makeReconnector } = require("./reconnect.js");
 
 const backend = new URLSearchParams(location.search).get("backend") || "http://127.0.0.1:7860";
 const orb = new Orb(document.getElementById("orb"));
 let state = initial();
+let muted = false; // owned by the tray in main.js; re-applied after every connect
 
 function dispatch(type) {
   const before = state;
@@ -17,8 +19,8 @@ function dispatch(type) {
 }
 
 const client = new PipecatClient({ transport: new SmallWebRTCTransport({ mediaManager: new WavMediaManager() }), enableMic: true, enableCam: false });
-client.on(RTVIEvent.Connected, () => dispatch("connected"));
-client.on(RTVIEvent.Disconnected, () => { dispatch("disconnected"); reconnect(); });
+client.on(RTVIEvent.Connected, () => { dispatch("connected"); client.enableMic(!muted); });
+client.on(RTVIEvent.Disconnected, () => { dispatch("disconnected"); reconnector.trigger(); });
 client.on(RTVIEvent.ServerMessage, (msg) => { if (msg && (msg.type === "wake" || msg.type === "sleep")) dispatch(msg.type); });
 client.on(RTVIEvent.UserStartedSpeaking, () => dispatch("user-start"));
 client.on(RTVIEvent.UserStoppedSpeaking, () => dispatch("user-stop"));
@@ -28,19 +30,10 @@ client.on(RTVIEvent.LocalAudioLevel, (level) => { if (state.mode === "listening"
 client.on(RTVIEvent.RemoteAudioLevel, (level) => { if (state.mode === "speaking") orb.setLevel(level); });
 
 window.vi.onToggle(() => dispatch("toggle"));
-window.vi.onMute((muted) => client.enableMic(!muted));
+window.vi.onMute((m) => { muted = m; client.enableMic(!muted); });
 
-let delay = 1000;
-async function connect() {
-  try {
-    await client.connect({ webrtcRequestParams: { endpoint: `${backend}/api/offer` } });
-    delay = 1000;
-  } catch {
-    reconnect();
-  }
-}
-function reconnect() {
-  setTimeout(connect, delay);
-  delay = Math.min(delay * 2, 30000);
-}
-connect();
+const reconnector = makeReconnector(async () => {
+  await client.connect({ webrtcRequestParams: { endpoint: `${backend}/api/offer` } });
+  reconnector.succeeded();
+});
+reconnector.trigger();
