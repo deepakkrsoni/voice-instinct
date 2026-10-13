@@ -18,6 +18,82 @@ def run(tmp_path, os_id, *args):
     return subprocess.run(["bash", str(SCRIPT), *args], capture_output=True, text=True, env=env), home
 
 
+def clean_repo(tmp_path):
+    """Temp copy of just what install.sh needs: no config.toml, no .env."""
+    repo = tmp_path / "repo"
+    (repo / "backend").mkdir(parents=True)
+    (repo / "frontend").mkdir()
+    shutil.copy(SCRIPT, repo / "install.sh")
+    shutil.copy(REPO / "config.example.toml", repo / "config.example.toml")
+    return repo
+
+
+def run_clean(tmp_path, *args, extra_env=None):
+    repo = clean_repo(tmp_path)
+    rel = tmp_path / "os-release"
+    rel.write_text('ID=arch\nNAME="arch"\n')
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    env = {**os.environ, "VI_OS_RELEASE": str(rel), "VI_HOME": str(home), **(extra_env or {})}
+    return subprocess.run(["bash", str(repo / "install.sh"), *args], capture_output=True, text=True, env=env), home
+
+
+def test_clean_checkout_dry_run_finishes(tmp_path):
+    r, _ = run_clean(tmp_path, "--dry-run")
+    assert r.returncode == 0, r.stderr
+    assert "create config.toml from config.example.toml" in r.stdout
+    assert 'Done. Say "Hey Nova"' in r.stdout
+    assert "systemctl --user restart voice-instinct.service" in r.stdout  # update re-run restarts the backend
+
+
+def test_uv_resolved_from_local_bin_after_install(tmp_path):
+    r, home = run_clean(tmp_path, "--dry-run", extra_env={"PATH": "/usr/bin:/bin"})
+    assert r.returncode == 0, r.stderr
+    assert "uv" in r.stdout and f"{home}/.local/bin" in r.stdout
+
+
+def uninstall_fixture(tmp_path):
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    sc = fake / "systemctl"
+    sc.write_text("#!/bin/sh\nexit 1\n")
+    sc.chmod(0o755)
+    home = tmp_path / "home"
+    for f in (".config/systemd/user/voice-instinct.service", ".config/autostart/voice-instinct.desktop", ".local/bin/voice-instinct", ".voice-instinct/models/x"):
+        (home / f).parent.mkdir(parents=True, exist_ok=True)
+        (home / f).write_text("x")
+    rel = tmp_path / "os-release"
+    rel.write_text('ID=arch\nNAME="arch"\n')
+    env = {**os.environ, "VI_OS_RELEASE": str(rel), "VI_HOME": str(home), "PATH": f"{fake}:{os.environ['PATH']}"}
+    return home, env
+
+
+def test_uninstall_is_idempotent_when_systemctl_fails(tmp_path):
+    home, env = uninstall_fixture(tmp_path)
+    r = subprocess.run(["bash", str(SCRIPT), "--uninstall"], capture_output=True, text=True, env=env)
+    assert r.returncode == 0, r.stderr
+    assert not (home / ".config/systemd/user/voice-instinct.service").exists()
+    assert not (home / ".config/autostart/voice-instinct.desktop").exists()
+    assert not (home / ".local/bin/voice-instinct").exists()
+    assert (home / ".voice-instinct/models/x").exists()
+
+
+def test_uninstall_purge_removes_data_even_when_systemctl_fails(tmp_path):
+    home, env = uninstall_fixture(tmp_path)
+    r = subprocess.run(["bash", str(SCRIPT), "--uninstall", "--purge"], capture_output=True, text=True, env=env)
+    assert r.returncode == 0, r.stderr
+    assert not (home / ".voice-instinct").exists()
+
+
+def test_append_env_adds_missing_newline(tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text("A=1")  # no trailing newline
+    fn = subprocess.run(["sed", "-n", "/^append_env()/,/^}/p", str(SCRIPT)], capture_output=True, text=True).stdout
+    assert fn, "append_env() missing"
+    subprocess.run(["bash", "-c", f'{fn}\nappend_env "$1" KEY val', "_", str(env_file)], check=True)
+    assert env_file.read_text() == "A=1\nKEY=val\n"
+
+
 def test_dry_run_on_arch_plans_everything_and_changes_nothing(tmp_path):
     r, home = run(tmp_path, "arch", "--dry-run")
     assert r.returncode == 0, r.stderr

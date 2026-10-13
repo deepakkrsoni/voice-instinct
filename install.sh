@@ -77,23 +77,37 @@ models() {
   fetch "$KOKORO_BASE/voices-v1.0.bin" "$MODELS/kokoro/voices-v1.0.bin" "$KOKORO_VOICES_SHA"
 }
 
+# cfgval <key>: value from config.toml, else config.example.toml; never fails (no pipefail abort on a missing file)
+cfgval() {
+  local f v=""
+  for f in "$REPO/config.toml" "$REPO/config.example.toml"; do
+    [ -f "$f" ] || continue
+    v="$(sed -n -e "s/^$1 *= *\"\([^\"]*\)\".*/\1/p" -e "s/^$1 *= *\([0-9][0-9]*\).*/\1/p" "$f" | head -1)"
+    [ -n "$v" ] && break
+  done
+  printf '%s' "$v"
+}
+
+append_env() { # append_env <file> <key> <value>
+  if [ -s "$1" ] && [ -n "$(tail -c1 "$1")" ]; then printf '\n' >>"$1"; fi
+  (umask 077; printf '%s=%s\n' "$2" "$3" >>"$1"); chmod 600 "$1"
+}
+
 config_and_key() {
   if [ -f "$REPO/config.toml" ]; then say "keep existing config.toml"; else
     say "create config.toml from config.example.toml"; run cp "$REPO/config.example.toml" "$REPO/config.toml"; fi
-  local key; key="$(sed -n 's/^api_key_env *= *"\(.*\)".*/\1/p' "$REPO/config.example.toml" | head -1)"
-  [ -f "$REPO/config.toml" ] && key="$(sed -n 's/^api_key_env *= *"\(.*\)".*/\1/p' "$REPO/config.toml" | head -1)"
+  local key; key="$(cfgval api_key_env)"
   if [ -n "$key" ] && ! grep -qs "^$key=" "$REPO/.env"; then
     if [ "$DRY" = 1 ] || [ ! -t 0 ]; then say "add $key=... to $REPO/.env (needed for the front model)"; else
       read -r -s -p "$key (input hidden; leave empty to add it later): " val; echo
-      if [ -n "$val" ]; then umask 077; printf '%s=%s\n' "$key" "$val" >>"$REPO/.env"; chmod 600 "$REPO/.env"; fi
+      if [ -n "$val" ]; then append_env "$REPO/.env" "$key" "$val"; fi
     fi
   fi
 }
 
 sway_rule() {
-  local size cfg="$REPO/config.toml" w="" rule="floating enable, sticky enable, border none"
-  [ -f "$cfg" ] || cfg="$REPO/config.example.toml"
-  size="$(sed -n 's/^size *= *\([0-9][0-9]*\).*/\1/p' "$cfg" | head -1)"; size="${size:-128}"
+  local size w="" rule="floating enable, sticky enable, border none"
+  size="$(cfgval size)"; size="${size:-128}"
   if command -v swaymsg >/dev/null; then
     w="$(swaymsg -t get_outputs 2>/dev/null | python3 -c 'import json,sys; print(next(o["rect"]["width"] for o in json.load(sys.stdin) if o.get("focused")))' 2>/dev/null || true)"
   fi
@@ -107,7 +121,7 @@ sway_rule() {
 }
 
 services() {
-  local uvbin; uvbin="$(command -v uv || echo "$HOME_DIR/.local/bin/uv")"
+  local uvbin="$UV"
   write "$UNIT" 644 <<EOF
 [Unit]
 Description=voice-instinct backend
@@ -137,7 +151,8 @@ X-GNOME-Autostart-enabled=true
 EOF
   if [ "$DRY" = 1 ] || systemctl --user show-environment >/dev/null 2>&1; then
     run systemctl --user daemon-reload
-    run systemctl --user enable --now voice-instinct.service
+    run systemctl --user enable voice-instinct.service
+    run systemctl --user restart voice-instinct.service  # re-run = update: pick up new code
   else
     say "No systemd user session here; start the backend with: cd $REPO/backend && uv run bot.py"
   fi
@@ -148,7 +163,9 @@ EOF
 }
 
 uninstall() {
-  run systemctl --user disable --now voice-instinct.service
+  # idempotent: a missing unit or no user systemd session must not stop the cleanup
+  if [ "$DRY" = 1 ]; then run systemctl --user disable --now voice-instinct.service
+  else systemctl --user disable --now voice-instinct.service 2>/dev/null || true; fi
   run rm -f "$UNIT" "$AUTOSTART" "$LAUNCHER"
   if [ "$PURGE" = 1 ]; then say "remove data in $HOME_DIR/.voice-instinct (models, database, workspace)"; run rm -rf "$HOME_DIR/.voice-instinct"; fi
   say "voice-instinct removed$([ "$PURGE" = 1 ] || echo '; your data in ~/.voice-instinct is kept (use --purge to delete it)')"
@@ -158,14 +175,15 @@ if [ "$UNINSTALL" = 1 ]; then uninstall; exit 0; fi
 
 distro_install
 command -v uv >/dev/null || run sh -c "curl -LsSf https://astral.sh/uv/install.sh | sh"
+UV="$(command -v uv || echo "$HOME_DIR/.local/bin/uv")"  # the fresh install is not on PATH yet
 models
 config_and_key
-run sh -c "cd '$REPO/backend' && uv sync"
+run sh -c "cd '$REPO/backend' && $UV sync"
 # npm 12 blocks install scripts, so fetch the Electron binary explicitly (harmless where npm already did)
 run sh -c "cd '$REPO/frontend' && npm ci && node node_modules/electron/install.js && npm run build"
 if ! command -v claude >/dev/null; then
   say "Install Claude Code (https://code.claude.com/docs) and log in with 'claude', then re-run this script."
 fi
 services
-name="$(sed -n 's/^name *= *"\(.*\)".*/\1/p' "$REPO/config.toml" 2>/dev/null | head -1)"
+name="$(cfgval name)"
 say "Done. Say \"Hey ${name:-Nova}\"."
