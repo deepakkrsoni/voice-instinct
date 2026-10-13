@@ -223,7 +223,7 @@ run sh -c "export PATH=\"$NODE_DIR/bin:\$PATH\"; cd '$REPO/frontend' && npm ci &
 # The errand browser: Playwright MCP (pinned; npm checks the registry's integrity hashes) and its Chromium.
 # The agent gets a fresh in-memory profile each run, never signed in to anything (backend/autonomy.py).
 BROWSER_DIR="$HOME_DIR/.voice-instinct/browser" BROWSER_MCP=0.0.83
-if grep -qs "\"version\": \"$BROWSER_MCP\"" "$BROWSER_DIR/node_modules/@playwright/mcp/package.json" && [ -d "$BROWSER_DIR/browsers" ]; then
+if grep -qs "\"version\": \"$BROWSER_MCP\"" "$BROWSER_DIR/node_modules/@playwright/mcp/package.json" && compgen -G "$BROWSER_DIR/browsers/chromium*" >/dev/null; then
   say "keep errand browser (Playwright MCP $BROWSER_MCP)"
 else
   # Chromium inside $BROWSER_DIR (not the shared ~/.cache/ms-playwright): --purge removes it all.

@@ -67,7 +67,7 @@ def test_errand_browser_is_private_and_only_offered_once_installed(tmp_path):
     (vi / "browser/browsers").mkdir()
     server = browser_mcp(tmp_path)["mcpServers"]["browser"]
     assert server["command"] == str(vi / "node/bin/node") and server["args"][0] == str(cli)
-    # A fresh in-memory profile each run: never signed in to anything, nothing kept on disk.
+    # A fresh profile each run: never signed in to anything (page snapshots stay in the task folder).
     assert "--isolated" in server["args"] and "--headless" in server["args"]
     assert "--user-data-dir" not in server["args"]
 
@@ -87,10 +87,10 @@ def test_the_shell_cannot_reach_any_host_beyond_the_hook_port():
 def test_claudes_own_login_browser_profiles_and_keyrings_are_off_limits():
     s = sandbox_settings(HOME, APP, DATA)
     deny_read, rules = s["sandbox"]["filesystem"]["denyRead"], s["permissions"]["deny"]
-    for p in ("~/.claude/.credentials.json", "~/.claude.json", "~/.mozilla", "~/.config/chromium",
+    for p in ("~/.claude", "~/.claude.json", "~/.mozilla", "~/.config/chromium",
               "~/.config/google-chrome", "~/.password-store", "~/.local/share/keyrings"):
         assert p in deny_read, p
-    assert "Read(~/.claude/.credentials.json)" in rules and "Read(~/.mozilla/**)" in rules
+    assert "Read(~/.claude/**)" in rules and "Read(~/.mozilla/**)" in rules
 
 
 def test_the_users_own_claude_md_is_not_loaded_into_errands():

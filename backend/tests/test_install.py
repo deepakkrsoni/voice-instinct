@@ -334,6 +334,6 @@ def test_an_installed_errand_browser_is_kept_on_re_run(tmp_path):
     m = home / ".voice-instinct/browser/node_modules/@playwright/mcp"
     m.mkdir(parents=True)
     (m / "package.json").write_text('{"version": "0.0.83"}')
-    (home / ".voice-instinct/browser/browsers").mkdir()
+    (home / ".voice-instinct/browser/browsers/chromium-1247").mkdir(parents=True)
     r, _ = run_clean(tmp_path, "--dry-run")
     assert "keep errand browser" in r.stdout and "install chromium" not in r.stdout

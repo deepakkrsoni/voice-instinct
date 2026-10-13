@@ -9,9 +9,10 @@ from pathlib import Path
 
 _SECRET_DIRS = (".ssh", ".aws", ".gnupg", ".config/gh", ".config/gcloud", ".kube", ".docker",
                 ".mozilla", ".config/chromium", ".config/google-chrome", ".password-store",
-                ".local/share/keyrings")  # logged-in browsers and keyrings
+                ".local/share/keyrings",  # logged-in browsers and keyrings
+                ".claude")  # Claude's login and the user's own session transcripts (the CLI reads them itself)
 _SECRET_FILES = (".netrc", ".git-credentials", ".npmrc", ".pypirc",
-                 ".claude/.credentials.json", ".claude.json")  # Claude's login; other MCP servers' secrets
+                 ".claude.json")  # other MCP servers' secrets
 # The errand browser's tools that run code outside the sandbox or read local files into a page.
 _BROWSER_DENY = ("mcp__browser__browser_run_code_unsafe", "mcp__browser__browser_file_upload")
 
