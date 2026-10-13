@@ -48,3 +48,14 @@ def test_ollama_and_openai_compatible_get_the_same_settings(monkeypatch):
     cfg = Config(provider="ollama", model="qwen3:8b", api_key_env="NO_SUCH_KEY")
     llm = build_llm(cfg, "BE BRIEF")
     assert llm._settings.model == "qwen3:8b" and llm._settings.system_instruction == "BE BRIEF"
+
+
+from pathlib import Path
+
+from services import PARAKEET_NAME, kokoro_paths, parakeet_dir
+
+
+def test_model_paths_come_from_models_dir():
+    cfg = Config(models_dir="/models")
+    assert parakeet_dir(cfg) == Path("/models") / PARAKEET_NAME
+    assert kokoro_paths(cfg) == (Path("/models/kokoro/kokoro-v1.0.onnx"), Path("/models/kokoro/voices-v1.0.bin"))

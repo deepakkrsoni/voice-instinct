@@ -8,7 +8,7 @@ from loguru import logger
 
 from autonomy import sandbox_settings
 from claude_cli import ClaudeCodeBackend
-from config import load
+from config import REPO_ROOT, load
 from delegate import make_tools
 from hooks import HookBridge, hide_hook_tokens, load_token, make_router, write_run_settings
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -27,11 +27,9 @@ from pipecat.transports.base_transport import TransportParams
 from pipecat.workers.runner import WorkerRunner
 from registry import Registry
 from relay import Relay, make_bridge_tools, start_session
-from services import ParakeetSTTService, build_llm
+from services import ParakeetSTTService, build_llm, kokoro_paths, parakeet_dir
 
-load_dotenv()
-
-KOKORO_DIR = Path.home() / "kokoro"
+load_dotenv(REPO_ROOT / ".env")
 
 cfg = load()
 DATA = Path(cfg.data_dir).expanduser()
@@ -71,13 +69,13 @@ transport_params = {
 async def bot(runner_args: RunnerArguments):
     transport = await create_transport(runner_args, transport_params)
 
-    stt = ParakeetSTTService()
+    stt = ParakeetSTTService(model_dir=parakeet_dir(cfg))
     backend = ClaudeCodeBackend(cwd=cfg.backend_cwd, timeout=cfg.backend_timeout,
                                 permission_mode=cfg.permission_mode)
     llm = build_llm(cfg, SYSTEM_PROMPT)
     tools = []
     if backend.available():
-        autonomy = sandbox_settings(Path.home(), Path(__file__).resolve().parent.parent, DATA)
+        autonomy = sandbox_settings(Path.home(), REPO_ROOT, DATA)
         settings_for = lambda sid: write_run_settings(
             DATA / "runs", sid, HOOK_TOKEN, cfg.hook_port, extra=autonomy)
         # Tools declare their own options with @tool_options; LLMContext(tools=...) is the registration.
@@ -86,9 +84,10 @@ async def bot(runner_args: RunnerArguments):
                  *make_bridge_tools(bridge, relay, registry, backend)]
     else:
         logger.warning("claude CLI not found; running front-model-only")
+    model_path, voices_path = kokoro_paths(cfg)
     tts = KokoroTTSService(
-        model_path=str(KOKORO_DIR / "kokoro-v1.0.onnx"),
-        voices_path=str(KOKORO_DIR / "voices-v1.0.bin"),
+        model_path=str(model_path),
+        voices_path=str(voices_path),
         settings=KokoroTTSService.Settings(voice="af_heart"),
     )
 
