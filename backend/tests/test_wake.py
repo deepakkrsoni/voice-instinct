@@ -83,3 +83,34 @@ def test_keep_awake_restarts_the_window_only_when_awake():
         return w.awake
 
     assert asyncio.run(go()) is False
+
+
+def test_keep_awake_extends_the_window_while_awake_then_it_sleeps():
+    async def go():
+        ctx, sent, mid = LLMContext(), [], {}
+
+        async def send(m):
+            sent.append(m)
+
+        w = make_wake(["hey nova"], 0.3, send)
+        user, _ = LLMContextAggregatorPair(ctx, user_params=LLMUserAggregatorParams(
+            user_turn_strategies=UserTurnStrategies(
+                start=[w, *default_user_turn_start_strategies()],
+                stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=0.2)])))
+
+        async def poke():
+            await asyncio.sleep(0.05)
+            w.wake("question")
+            for _ in range(8):  # 0.8s, well over two 0.3s windows
+                await asyncio.sleep(0.1)
+                w.keep_awake()
+            mid["awake"], mid["sent"] = w.awake, list(sent)
+
+        task = asyncio.get_running_loop().create_task(poke())
+        await run_test(user, frames_to_send=[SleepFrame(sleep=1.8)])
+        await task
+        return mid, sent, w
+
+    mid, sent, w = asyncio.run(go())
+    assert mid["awake"] and {"type": "sleep"} not in mid["sent"]
+    assert {"type": "sleep"} in sent and not w.awake
