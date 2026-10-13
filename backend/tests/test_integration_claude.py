@@ -7,7 +7,7 @@ import pytest
 import uvicorn
 from fastapi import FastAPI
 
-from backend import ClaudeCodeBackend
+from claude_cli import ClaudeCodeBackend
 from hooks import HookBridge, make_router, write_run_settings
 from registry import Registry
 
@@ -102,7 +102,7 @@ def test_autonomy_shell_runs_unprompted_in_the_folder_and_cannot_write_outside(t
             tmp_path, port,
             f"Run these two shell commands one at a time and tell me whether each worked: "
             f"1) echo ok > made.txt   2) touch {outside}",
-            sandbox_settings(Path.home(), Path(__file__).parent.parent, tmp_path / "data"))
+            sandbox_settings(Path.home(), Path(__file__).resolve().parent.parent.parent, tmp_path / "data"))
     finally:
         server.should_exit = True
         made_outside = outside.exists()
@@ -119,7 +119,7 @@ def test_secret_deny_rule_stops_the_file_tool_even_in_auto_mode(tmp_path):
 
     canary = Path.home() / ".vi_canary_test.txt"
     canary.write_text("CANARY-SECRET-123\n")
-    extra = sandbox_settings(Path.home(), Path(__file__).parent.parent, tmp_path / "data")
+    extra = sandbox_settings(Path.home(), Path(__file__).resolve().parent.parent.parent, tmp_path / "data")
     extra["permissions"]["deny"].append("Read(~/.vi_canary_test.txt)")
     extra["sandbox"]["filesystem"]["denyRead"].append("~/.vi_canary_test.txt")
     server, reg, port = serve("deny")

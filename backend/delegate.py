@@ -5,7 +5,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from backend import BackendResult
+from claude_cli import BackendResult
 from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.frames.frames import FunctionCallResultProperties
 from pipecat.services.llm_service import FunctionCallParams

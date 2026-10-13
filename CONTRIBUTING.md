@@ -19,16 +19,16 @@ You need Linux, [uv](https://docs.astral.sh/uv/), the `claude` CLI logged in, `b
 
 ```
 git clone https://github.com/deepakkrsoni/voice-instinct && cd voice-instinct
-uv sync
-echo 'GEMINI_API_KEY=...' > .env     # never commit this
-uv run bot.py                        # http://localhost:7860/client
+echo 'GEMINI_API_KEY=...' > .env     # repo root; never commit this
+cd backend && uv sync
+cd backend && uv run bot.py          # http://localhost:7860/client
 ```
 
 ## Tests
 
 ```
-uv run pytest            # unit tests, no network, no models needed
-uv run pytest -m claude  # real-CLI tests; they use your Claude subscription
+cd backend && uv run pytest            # unit tests, no network, no models needed
+cd backend && uv run pytest -m claude  # real-CLI tests; they use your Claude subscription
 ```
 
 Write the failing test first, watch it fail for the right reason, then make it pass. New behavior
@@ -56,7 +56,7 @@ do not cover, say so in your PR and explain why.
 ## Pull requests
 
 1. Branch from `main` and keep the PR focused on one issue; reference it (`Closes #N`).
-2. Run `uv run pytest` and, if you touched the backend or hooks, `uv run pytest -m claude`.
+2. Run `cd backend && uv run pytest` and, if you touched the backend or hooks, `cd backend && uv run pytest -m claude`.
 3. Describe what you verified and what you did not (for example, not tried by voice).
 4. Be kind in review; we iterate in the open.
 

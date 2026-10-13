@@ -4,7 +4,7 @@ import os
 import time
 from pathlib import Path
 
-from backend import READ_ONLY_TOOLS, ClaudeCodeBackend, parse_stream
+from claude_cli import READ_ONLY_TOOLS, ClaudeCodeBackend, parse_stream
 
 FAKE = str(Path(__file__).parent / "fake_claude.sh")
 

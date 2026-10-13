@@ -1,7 +1,7 @@
 import asyncio
 from types import SimpleNamespace
 
-from backend import BackendResult
+from claude_cli import BackendResult
 from delegate import make_tools
 from registry import Registry
 

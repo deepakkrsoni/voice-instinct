@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from autonomy import sandbox_settings
-from backend import ClaudeCodeBackend
+from claude_cli import ClaudeCodeBackend
 from config import load
 from delegate import make_tools
 from hooks import HookBridge, hide_hook_tokens, load_token, make_router, write_run_settings
@@ -77,7 +77,7 @@ async def bot(runner_args: RunnerArguments):
     llm = build_llm(cfg, SYSTEM_PROMPT)
     tools = []
     if backend.available():
-        autonomy = sandbox_settings(Path.home(), Path(__file__).parent, DATA)
+        autonomy = sandbox_settings(Path.home(), Path(__file__).resolve().parent.parent, DATA)
         settings_for = lambda sid: write_run_settings(
             DATA / "runs", sid, HOOK_TOKEN, cfg.hook_port, extra=autonomy)
         # Tools declare their own options with @tool_options; LLMContext(tools=...) is the registration.
