@@ -30,6 +30,7 @@ from pipecat.workers.runner import WorkerRunner
 from registry import Registry
 from relay import Relay, make_bridge_tools, start_session
 from services import ParakeetSTTService, build_llm, kokoro_paths, parakeet_dir
+from shutdown import cancel_on_exit
 from wake import make_wake
 
 load_dotenv(REPO_ROOT / ".env")
@@ -38,6 +39,7 @@ cfg = load()
 DATA = Path(cfg.data_dir).expanduser()
 registry = Registry(DATA / "harness.db")
 registry.expire_open()  # questions left open by a previous run can no longer be answered
+sessions = set()  # open sessions' runners, cancelled when the server is stopped
 relay = Relay(registry)
 bridge = HookBridge(registry, relay, cfg.permission_timeout)
 HOOK_TOKEN = load_token(DATA / "hook-token")
@@ -157,7 +159,12 @@ async def bot(runner_args: RunnerArguments):
     async def on_pipeline_finished(worker, frame):
         relay.detach()  # runs for graceful and cancelled shutdowns alike
 
-    await runner.run()
+    sessions.add(runner)
+    cancel_on_exit(sessions)
+    try:
+        await runner.run()
+    finally:
+        sessions.discard(runner)
 
 
 if __name__ == "__main__":

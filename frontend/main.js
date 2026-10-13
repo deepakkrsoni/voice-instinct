@@ -65,7 +65,7 @@ app.whenReady().then(async () => {
   await createWindow();
   tray = new Tray(path.join(__dirname, "icon.png"));
   const menu = () => Menu.buildFromTemplate([
-    { label: "Show", click: toggle },
+    { label: "Show / Hide", click: toggle },
     { label: "Mute microphone", type: "checkbox", checked: muted, click: (item) => { muted = item.checked; win.webContents.send("mute", muted); } },
     { type: "separator" },
     { label: "Quit", click: () => app.quit() },

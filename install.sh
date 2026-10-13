@@ -148,7 +148,10 @@ Description=voice-instinct backend
 WorkingDirectory=$REPO/backend
 ExecStart=$uvbin run --project $REPO/backend python bot.py
 Restart=on-failure
+# uv exits 143 when systemd stops it with SIGTERM; that is a normal stop
+SuccessExitStatus=143
 Environment=PYTHONUNBUFFERED=1
+Environment=PATH=$HOME_DIR/.local/bin:/usr/local/bin:/usr/bin:/bin
 
 [Install]
 WantedBy=default.target
