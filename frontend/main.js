@@ -1,6 +1,7 @@
 // Electron main process: a hidden, frameless, transparent orb window; tray; single-instance toggle.
 const { app, BrowserWindow, Tray, Menu, ipcMain, screen, session } = require("electron");
 const path = require("node:path");
+const { trayItems } = require("./tray.js");
 
 const BACKEND = "http://127.0.0.1:7860"; // the page's CSP allows only this backend
 const DEFAULTS = { name: "Nova", size: 128, position: "top-right" }; // same as backend/config.py
@@ -85,14 +86,9 @@ app.whenReady().then(async () => {
   session.defaultSession.setPermissionCheckHandler((wc, permission) => permission === "media" && ours(wc));
   createWindow();
   tray = new Tray(path.join(__dirname, "icon.png"));
-  const menu = () => Menu.buildFromTemplate([
-    { label: status, enabled: false },
-    { label: "Show / Hide", click: toggle },
-    { label: "Mute microphone", type: "checkbox", checked: muted, click: (item) => { muted = item.checked; win.webContents.send("mute", muted); } },
-    { type: "separator" },
-    { label: "Quit", click: () => app.quit() },
-  ]);
-  const refresh = () => { tray.setToolTip(`voice-instinct: ${status}`); tray.setContextMenu(menu()); };
+  const setMuted = (m) => { muted = m; win.webContents.send("mute", muted); refresh(); };
+  const menu = () => Menu.buildFromTemplate(trayItems({ status, muted }, { toggle, setMuted, quit: () => app.quit() }));
+  const refresh = () => { tray.setToolTip(`voice-instinct: ${menu().items[0].label}`); tray.setContextMenu(menu()); };
   refresh();
   ipcMain.on("status", (_e, text) => { status = text; refresh(); });
   if (process.argv.includes("--toggle")) toggle();
