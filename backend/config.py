@@ -57,6 +57,10 @@ def load(path=None) -> Config:
     cfg.name = cfg.name.strip()
     if not cfg.name:
         raise ValueError("config.toml: [assistant] name must not be empty")
+    if isinstance(cfg.gui_size, bool) or not isinstance(cfg.gui_size, int) or not 48 <= cfg.gui_size <= 1024:
+        raise ValueError("config.toml: [gui] size must be a whole number of pixels from 48 to 1024")
+    if isinstance(cfg.awake_timeout, bool) or not isinstance(cfg.awake_timeout, (int, float)) or cfg.awake_timeout <= 0:
+        raise ValueError("config.toml: [assistant] awake_timeout must be a number of seconds above 0")
     if cfg.gui_position not in POSITIONS:
         raise ValueError(f"config.toml: [gui] position must be one of {', '.join(POSITIONS)}")
     return cfg

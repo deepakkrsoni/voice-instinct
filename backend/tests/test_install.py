@@ -183,3 +183,22 @@ def test_sway_rule_uses_gui_size_and_output_width(tmp_path):
 def test_shellcheck_is_clean():
     r = subprocess.run(["shellcheck", "-S", "warning", str(SCRIPT)], capture_output=True, text=True)
     assert r.returncode == 0, r.stdout
+
+
+def test_no_answer_at_the_sudo_prompt_means_no(tmp_path):
+    # stdin closed (CI, curl | bash): the installer must not go ahead and run sudo.
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    (fake / "sudo").write_text(f"#!/bin/sh\ntouch {tmp_path}/sudo-ran\n")
+    (fake / "sudo").chmod(0o755)
+    for tool in ("curl", "systemctl", "uv", "npm"):  # if the prompt ever says yes again, fail fast, touch nothing real
+        (fake / tool).write_text("#!/bin/sh\nexit 1\n")
+        (fake / tool).chmod(0o755)
+    rel = tmp_path / "os-release"
+    rel.write_text('ID=arch\nNAME="arch"\n')
+    home = tmp_path / "home"
+    home.mkdir()
+    env = {**os.environ, "VI_OS_RELEASE": str(rel), "VI_HOME": str(home), "PATH": f"{fake}:{os.environ['PATH']}"}
+    r = subprocess.run(["bash", str(SCRIPT)], capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
+    assert r.returncode != 0 and not (tmp_path / "sudo-ran").exists()
+    assert "sudo pacman -S --needed" in r.stderr  # tells the user what to run instead

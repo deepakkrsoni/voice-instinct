@@ -42,7 +42,9 @@ window.vi.onMute((m) => { muted = m; client.enableMic(!muted); });
 // stays the single caller. The adapter plays the bot's audio (nothing else does: the transport only
 // plays the WebRTC remote track if an element is attached, and WavMediaManager's player is fed by
 // bufferBotAudio, which SmallWebRTC never calls).
+const botAudio = new Audio(); // one element: a repeated trackStarted replaces the source, never adds a player
 const adapter = createPipecatAdapter(client, {
+  createAudioElement: () => botAudio,
   connect: async () => {
     client.enableMic(!muted); // mic follows mute before any audio can flow
     await client.connect({ webrtcRequestParams: { endpoint: `${backend}/api/offer` } });

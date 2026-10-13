@@ -6,23 +6,26 @@ const BACKEND = process.env.VI_BACKEND_URL || "http://127.0.0.1:7860";
 const DEFAULTS = { name: "Nova", size: 128, position: "top-right" }; // same as backend/config.py
 app.setName("voice-instinct"); // Wayland app_id / X11 class, used by compositor window rules
 
-if (!app.requestSingleInstanceLock()) app.quit();
+if (!app.requestSingleInstanceLock()) {
+  app.exit(0); // the running instance got our argv (--toggle) through "second-instance"
+  return;
+}
 
 let win = null;
 let tray = null;
 let muted = false;
 let status = "Not connected (is the backend running?)"; // set by the renderer
 
-// At login the backend may still be loading its models, so wait for it before using the defaults.
-async function guiConfig(tries = 30) {
-  for (let i = 0; i < tries; i++) {
+// At login the backend may still be loading its models: start with the defaults, keep asking, and
+// apply the user's size and position once it answers.
+async function guiConfig() {
+  for (;;) {
     try {
       const r = await fetch(`${BACKEND}/gui-config`);
       if (r.ok) return { ...DEFAULTS, ...(await r.json()) };
     } catch {}
-    await new Promise((res) => setTimeout(res, 1000));
+    await new Promise((res) => setTimeout(res, 2000));
   }
-  return DEFAULTS;
 }
 
 function placement(cfg) {
@@ -42,8 +45,8 @@ function toggle() {
   if (win) win.webContents.send("toggle");
 }
 
-async function createWindow() {
-  const cfg = await guiConfig();
+function createWindow() {
+  const cfg = DEFAULTS;
   const [px, py] = placement(cfg);
   win = new BrowserWindow({
     width: cfg.size, height: cfg.size, x: px, y: py,
@@ -53,7 +56,14 @@ async function createWindow() {
   });
   win.setAlwaysOnTop(true, "floating");
   win.webContents.on("did-finish-load", () => win.webContents.send("mute", muted)); // page reloads forget it
+  // Nothing but our own page: no navigation, no new windows.
+  win.webContents.on("will-navigate", (e) => e.preventDefault());
+  win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   win.loadFile(path.join(__dirname, "renderer", "index.html"), { query: { backend: BACKEND } });
+  guiConfig().then((c) => {
+    const [x, y] = placement(c);
+    win.setBounds({ x, y, width: c.size, height: c.size });
+  });
 }
 
 app.on("second-instance", (_event, argv) => {
@@ -62,8 +72,10 @@ app.on("second-instance", (_event, argv) => {
 
 app.whenReady().then(async () => {
   // Only the microphone, only for our own page.
-  session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === "media"));
-  await createWindow();
+  const ours = (wc) => wc === win?.webContents;
+  session.defaultSession.setPermissionRequestHandler((wc, permission, cb) => cb(permission === "media" && ours(wc)));
+  session.defaultSession.setPermissionCheckHandler((wc, permission) => permission === "media" && ours(wc));
+  createWindow();
   tray = new Tray(path.join(__dirname, "icon.png"));
   const menu = () => Menu.buildFromTemplate([
     { label: status, enabled: false },

@@ -104,6 +104,11 @@ class Relay:
                 self._queue.append(q["id"])
         await self._pump()
 
+    @property
+    def asking(self) -> bool:
+        """A question has been spoken and is waiting for the user's answer."""
+        return self._current is not None
+
     def detach(self, task=None):
         if task is not None and task is not self._task:
             return  # a session that already ended; a newer one is attached

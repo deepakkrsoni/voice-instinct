@@ -103,7 +103,7 @@ async def bot(runner_args: RunnerArguments):
         if "worker" in holder:
             await holder["worker"].rtvi.send_server_message(msg)
 
-    wake = make_wake(cfg.wake_phrases, cfg.awake_timeout, send_gui)
+    wake = make_wake(cfg.wake_phrases, cfg.awake_timeout, send_gui, hold=lambda: relay.asking)
     relay.on_question = lambda: wake.wake("question")
 
     context = LLMContext(tools=tools)

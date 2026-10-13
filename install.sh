@@ -57,8 +57,9 @@ distro_install() {
   esac
   say "System packages (needs sudo): ${PKGS[*]}"
   if [ "$DRY" = 0 ]; then
-    read -r -p "Install them now with sudo? [Y/n] " ok || ok=y
-    case "${ok:-y}" in [nN]*) echo "Skipped. Install them yourself, then re-run." >&2; exit 1 ;; esac
+    ok=n  # no terminal or no answer (CI, curl | bash) means no: never run sudo unasked
+    [ -t 0 ] && { read -r -p "Install them now with sudo? [Y/n] " ok || ok=n; ok="${ok:-y}"; }
+    case "$ok" in [yY]*) ;; *) echo "Not installing system packages. Run this yourself, then re-run: ${PM[*]}" >&2; exit 1 ;; esac
   fi
   run "${PM[@]}"
 }
@@ -148,6 +149,7 @@ Description=voice-instinct backend
 WorkingDirectory=$REPO/backend
 ExecStart=$uvbin run --project $REPO/backend python bot.py
 Restart=on-failure
+RestartSec=3
 # uv exits 143 when systemd stops it with SIGTERM; that is a normal stop
 SuccessExitStatus=143
 Environment=PYTHONUNBUFFERED=1
@@ -188,6 +190,8 @@ uninstall() {
   if [ "$DRY" = 1 ]; then run systemctl --user disable --now voice-instinct.service
   else systemctl --user disable --now voice-instinct.service 2>/dev/null || true; fi
   run rm -f "$UNIT" "$AUTOSTART" "$LAUNCHER"
+  if [ "$DRY" = 1 ]; then run systemctl --user daemon-reload
+  else systemctl --user daemon-reload 2>/dev/null || true; fi
   if [ "$PURGE" = 1 ]; then say "remove data in $HOME_DIR/.voice-instinct (models, database, workspace)"; run rm -rf "$HOME_DIR/.voice-instinct"; fi
   say "voice-instinct removed$([ "$PURGE" = 1 ] || echo '; your data in ~/.voice-instinct is kept (use --purge to delete it)')"
 }

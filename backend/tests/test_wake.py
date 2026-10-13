@@ -26,20 +26,22 @@ def said(text):
             VADUserStoppedSpeakingFrame(), SleepFrame(sleep=0.6)]
 
 
-async def converse(texts, timeout=10, before=None):
+async def converse(texts, timeout=10, before=None, hold=None, pause=0.1, early=None):
     ctx, sent = LLMContext(), []
 
     async def send(msg):
         sent.append(msg)
 
-    wake = make_wake(["hey nova", "okay nova"], timeout, send)
+    wake = make_wake(["hey nova", "okay nova"], timeout, send, **({"hold": hold} if hold else {}))
+    if early:
+        early(wake)  # before the pipeline has set the strategy up
     user, _ = LLMContextAggregatorPair(ctx, user_params=LLMUserAggregatorParams(
         user_turn_strategies=UserTurnStrategies(
             start=[wake, *default_user_turn_start_strategies()],
             stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=0.2)])))
     frames = [f for t in texts for f in said(t)]
     if before:
-        frames = [SleepFrame(sleep=0.1), *frames]
+        frames = [SleepFrame(sleep=pause), *frames]
 
         async def poke():
             await asyncio.sleep(0.05)
@@ -129,3 +131,22 @@ def test_other_client_messages_do_not_wake_it():
     msg = SimpleNamespace(type="set-language", data={})
     users, _, sent, _ = asyncio.run(converse(["what's on today"], before=lambda w: handle_client_message(w, msg)))
     assert users == [] and sent == []
+
+
+def test_it_stays_awake_while_a_question_waits_for_an_answer():
+    # The user takes longer than the quiet timeout to answer; the answer must still be heard.
+    users, _, sent, _ = asyncio.run(converse(
+        ["yes go ahead"], timeout=0.3, hold=lambda: True, pause=0.9, before=lambda w: w.wake("question")))
+    assert users == ["yes go ahead"] and {"type": "sleep"} not in sent
+
+
+def test_without_an_open_question_the_timeout_still_applies():
+    users, _, sent, _ = asyncio.run(converse(
+        ["yes go ahead"], timeout=0.3, hold=lambda: False, pause=0.9, before=lambda w: w.wake("question")))
+    assert users == [] and {"type": "sleep"} in sent
+
+
+def test_a_wake_before_the_pipeline_starts_takes_effect_once_it_does():
+    # A reconnect with an open question can wake the gate before the aggregator's setup ran.
+    users, _, sent, _ = asyncio.run(converse(["yes go ahead"], early=lambda w: w.wake("question")))
+    assert users == ["yes go ahead"] and sent[0] == {"type": "wake", "reason": "question"}

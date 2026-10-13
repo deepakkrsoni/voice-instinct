@@ -423,3 +423,17 @@ def test_an_old_session_finishing_late_does_not_detach_the_new_one():
         return new
 
     assert len(run(go()).frames) == 1
+
+
+def test_asking_is_true_from_speaking_a_question_until_it_is_closed():
+    async def go():
+        reg, relay, task, ctx, bridge = setup("hi")
+        q = reg.add_question("s1", "permission", "ls", "Bash", {"command": "ls"})
+        before = relay.asking
+        await relay.raise_question(q)
+        during = relay.asking
+        reg.resolve_question(q, "answered", "allow")
+        relay.question_closed(q)
+        return before, during, relay.asking
+
+    assert run(go()) == (False, True, False)

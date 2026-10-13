@@ -69,3 +69,11 @@ def test_bad_position_or_empty_name_fails_fast_with_a_clear_message(tmp_path):
 def test_default_config_path_is_the_repo_root():
     assert (REPO_ROOT / "config.example.toml").exists()
     assert "bottom-right" in POSITIONS
+
+
+@pytest.mark.parametrize("body", ['[gui]\nsize = "big"', "[gui]\nsize = 10", '[assistant]\nawake_timeout = "10"', "[assistant]\nawake_timeout = 0"])
+def test_a_size_or_timeout_that_is_not_a_sensible_number_fails_fast(tmp_path, body):
+    f = tmp_path / "c.toml"
+    f.write_text(body)
+    with pytest.raises(ValueError, match="config.toml"):
+        load(f)
