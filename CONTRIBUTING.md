@@ -14,26 +14,27 @@ machine. The project is early, so a small, well-tested change is worth more than
 
 ## Set up
 
-You need Linux, [uv](https://docs.astral.sh/uv/), the `claude` CLI logged in, `bubblewrap` and
-`socat` (the sandbox refuses to start without them), plus the local models described in the README.
+You need Linux and the `claude` CLI logged in. The installer handles the rest (system packages incl.
+`bubblewrap` and `socat`, uv, local models, backend and frontend, services).
 
 ```
-git clone https://github.com/deepakkrsoni/voice-instinct && cd voice-instinct
-echo 'GEMINI_API_KEY=...' > .env     # repo root; never commit this
-cd backend && uv sync
-cd backend && uv run bot.py          # http://localhost:7860/client
+git clone https://github.com/deepakkrsoni/voice-instinct && cd voice-instinct && ./install.sh
 ```
+
+`./install.sh --dry-run` previews every step without changing anything; `--uninstall` removes the
+services and launcher (your data in `~/.voice-instinct` is kept), and `--uninstall --purge` deletes that too.
 
 ## Tests
 
 ```
 cd backend && uv run pytest            # unit tests, no network, no models needed
+cd frontend && npm test                # Electron/orb-ui tests
 cd backend && uv run pytest -m claude  # real-CLI tests; they use your Claude subscription
 ```
 
 Write the failing test first, watch it fail for the right reason, then make it pass. New behavior
 needs a test; a bug fix needs a test that failed before the fix. Do not mock what you can run: the
-fakes in `tests/` stand in for Pipecat and the CLI only at the edges.
+fakes in `backend/tests/` (and `frontend/tests/`) stand in for Pipecat and the CLI only at the edges.
 
 ## Rules that protect the user (please keep them true)
 

@@ -1,0 +1,171 @@
+#!/usr/bin/env bash
+# voice-instinct installer: system packages, uv, models, backend, frontend, services.
+# Usage: ./install.sh [--dry-run] [--uninstall] [--purge]
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HOME_DIR="${VI_HOME:-$HOME}"
+OS_RELEASE="${VI_OS_RELEASE:-/etc/os-release}"
+DRY=0 UNINSTALL=0 PURGE=0
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run) DRY=1 ;;
+    --uninstall) UNINSTALL=1 ;;
+    --purge) PURGE=1 ;;
+    *) echo "unknown option: $arg" >&2; exit 2 ;;
+  esac
+done
+
+PKGS=(bubblewrap socat nodejs npm curl tar bzip2)
+MODELS="$HOME_DIR/.voice-instinct/models"
+PARAKEET="sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
+PARAKEET_URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/$PARAKEET.tar.bz2"
+PARAKEET_SHA="5793d0fd397c5778d2cf2126994d58e9d56b1be7c04d13c7a15bb1b4eafb16bf"
+KOKORO_BASE="https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
+KOKORO_ONNX_SHA="7d5df8ecf7d4b1878015a32686053fd0eebe2bc377234608764cc0ef3636a6c5"
+KOKORO_VOICES_SHA="bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d"
+UNIT="$HOME_DIR/.config/systemd/user/voice-instinct.service"
+AUTOSTART="$HOME_DIR/.config/autostart/voice-instinct.desktop"
+LAUNCHER="$HOME_DIR/.local/bin/voice-instinct"
+
+say() { printf '==> %s\n' "$*"; }
+run() { if [ "$DRY" = 1 ]; then printf 'would run: %s\n' "$*"; else "$@"; fi; }
+write() { # write <path> <mode>  (content on stdin)
+  if [ "$DRY" = 1 ]; then printf 'would write: %s\n' "$1"; cat >/dev/null; return; fi
+  mkdir -p "$(dirname "$1")"; cat >"$1"; chmod "$2" "$1"
+}
+
+if [ "$(id -u)" = 0 ] && [ "$DRY" = 0 ]; then echo "Run this as your normal user, not root (it uses sudo only for packages)." >&2; exit 1; fi
+
+distro_install() {
+  # shellcheck disable=SC1090
+  . "$OS_RELEASE"
+  local family="${ID:-} ${ID_LIKE:-}"
+  case "$family" in
+    *arch*) PM=(sudo pacman -S --needed "${PKGS[@]}") ;;
+    *debian*|*ubuntu*) PM=(sudo apt-get install -y "${PKGS[@]}") ;;
+    *fedora*|*rhel*) PM=(sudo dnf install -y "${PKGS[@]}") ;;
+    *) echo "Your distribution (${NAME:-unknown}) is not supported yet. Supported: Arch, Debian/Ubuntu, Fedora." >&2
+       echo "Install these yourself, then re-run: ${PKGS[*]}" >&2; exit 1 ;;
+  esac
+  say "System packages (needs sudo): ${PKGS[*]}"
+  if [ "$DRY" = 0 ]; then
+    read -r -p "Install them now with sudo? [Y/n] " ok || ok=y
+    case "${ok:-y}" in [nN]*) echo "Skipped. Install them yourself, then re-run." >&2; exit 1 ;; esac
+  fi
+  run "${PM[@]}"
+}
+
+fetch() { # fetch <url> <dest> <sha256>
+  local url="$1" dest="$2" sha="$3"
+  if [ -f "$dest" ] && [ "$(sha256sum "$dest" | cut -d' ' -f1)" = "$sha" ]; then say "keep $(basename "$dest") (checksum ok)"; return; fi
+  run mkdir -p "$(dirname "$dest")"
+  run curl -fL --retry 2 -o "$dest.part" "$url"
+  if [ "$DRY" = 0 ]; then
+    if [ "$(sha256sum "$dest.part" | cut -d' ' -f1)" != "$sha" ]; then rm -f "$dest.part"; echo "Checksum mismatch for $url" >&2; exit 1; fi
+    mv "$dest.part" "$dest"
+  fi
+}
+
+models() {
+  if [ -f "$MODELS/$PARAKEET/encoder.int8.onnx" ]; then say "keep Parakeet model"; else
+    fetch "$PARAKEET_URL" "$MODELS/$PARAKEET.tar.bz2" "$PARAKEET_SHA"
+    run tar -xjf "$MODELS/$PARAKEET.tar.bz2" -C "$MODELS"
+    run rm -f "$MODELS/$PARAKEET.tar.bz2"
+  fi
+  fetch "$KOKORO_BASE/kokoro-v1.0.onnx" "$MODELS/kokoro/kokoro-v1.0.onnx" "$KOKORO_ONNX_SHA"
+  fetch "$KOKORO_BASE/voices-v1.0.bin" "$MODELS/kokoro/voices-v1.0.bin" "$KOKORO_VOICES_SHA"
+}
+
+config_and_key() {
+  if [ -f "$REPO/config.toml" ]; then say "keep existing config.toml"; else
+    say "create config.toml from config.example.toml"; run cp "$REPO/config.example.toml" "$REPO/config.toml"; fi
+  local key; key="$(sed -n 's/^api_key_env *= *"\(.*\)".*/\1/p' "$REPO/config.example.toml" | head -1)"
+  [ -f "$REPO/config.toml" ] && key="$(sed -n 's/^api_key_env *= *"\(.*\)".*/\1/p' "$REPO/config.toml" | head -1)"
+  if [ -n "$key" ] && ! grep -qs "^$key=" "$REPO/.env"; then
+    if [ "$DRY" = 1 ] || [ ! -t 0 ]; then say "add $key=... to $REPO/.env (needed for the front model)"; else
+      read -r -s -p "$key (input hidden; leave empty to add it later): " val; echo
+      if [ -n "$val" ]; then umask 077; printf '%s=%s\n' "$key" "$val" >>"$REPO/.env"; chmod 600 "$REPO/.env"; fi
+    fi
+  fi
+}
+
+sway_rule() {
+  local size cfg="$REPO/config.toml" w="" rule="floating enable, sticky enable, border none"
+  [ -f "$cfg" ] || cfg="$REPO/config.example.toml"
+  size="$(sed -n 's/^size *= *\([0-9][0-9]*\).*/\1/p' "$cfg" | head -1)"; size="${size:-128}"
+  if command -v swaymsg >/dev/null; then
+    w="$(swaymsg -t get_outputs 2>/dev/null | python3 -c 'import json,sys; print(next(o["rect"]["width"] for o in json.load(sys.stdin) if o.get("focused")))' 2>/dev/null || true)"
+  fi
+  if [ -n "$w" ]; then
+    rule="$rule, resize set $size $size, move position $((w - size - 24)) 12"
+    say "Sway ignores app positioning; add to your config:  for_window [app_id=\"voice-instinct\"] $rule"
+  else
+    say "swaymsg unavailable, so no resize/move; add to your config:  for_window [app_id=\"voice-instinct\"] $rule"
+  fi
+  say "         and a key:        bindsym \$mod+n exec voice-instinct toggle"
+}
+
+services() {
+  local uvbin; uvbin="$(command -v uv || echo "$HOME_DIR/.local/bin/uv")"
+  write "$UNIT" 644 <<EOF
+[Unit]
+Description=voice-instinct backend
+
+[Service]
+WorkingDirectory=$REPO/backend
+ExecStart=$uvbin run --project $REPO/backend python bot.py
+Restart=on-failure
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target
+EOF
+  write "$LAUNCHER" 755 <<EOF
+#!/usr/bin/env bash
+# voice-instinct launcher: "voice-instinct" starts the orb, "voice-instinct toggle" shows or hides it.
+args=()
+[ "\${1:-}" = toggle ] && args=(--toggle)
+exec "$REPO/frontend/node_modules/.bin/electron" "$REPO/frontend" "\${args[@]}"
+EOF
+  write "$AUTOSTART" 644 <<EOF
+[Desktop Entry]
+Type=Application
+Name=voice-instinct
+Exec=$LAUNCHER
+X-GNOME-Autostart-enabled=true
+EOF
+  if [ "$DRY" = 1 ] || systemctl --user show-environment >/dev/null 2>&1; then
+    run systemctl --user daemon-reload
+    run systemctl --user enable --now voice-instinct.service
+  else
+    say "No systemd user session here; start the backend with: cd $REPO/backend && uv run bot.py"
+  fi
+  case "${XDG_CURRENT_DESKTOP:-}${SWAYSOCK:+sway}${HYPRLAND_INSTANCE_SIGNATURE:+hyprland}" in
+    *sway*) sway_rule ;;
+    *hyprland*|*Hyprland*) say "Hyprland: windowrulev2 = float, class:^(voice-instinct)\$ and windowrulev2 = pin, class:^(voice-instinct)\$" ;;
+  esac
+}
+
+uninstall() {
+  run systemctl --user disable --now voice-instinct.service
+  run rm -f "$UNIT" "$AUTOSTART" "$LAUNCHER"
+  if [ "$PURGE" = 1 ]; then say "remove data in $HOME_DIR/.voice-instinct (models, database, workspace)"; run rm -rf "$HOME_DIR/.voice-instinct"; fi
+  say "voice-instinct removed$([ "$PURGE" = 1 ] || echo '; your data in ~/.voice-instinct is kept (use --purge to delete it)')"
+}
+
+if [ "$UNINSTALL" = 1 ]; then uninstall; exit 0; fi
+
+distro_install
+command -v uv >/dev/null || run sh -c "curl -LsSf https://astral.sh/uv/install.sh | sh"
+models
+config_and_key
+run sh -c "cd '$REPO/backend' && uv sync"
+# npm 12 blocks install scripts, so fetch the Electron binary explicitly (harmless where npm already did)
+run sh -c "cd '$REPO/frontend' && npm ci && node node_modules/electron/install.js && npm run build"
+if ! command -v claude >/dev/null; then
+  say "Install Claude Code (https://code.claude.com/docs) and log in with 'claude', then re-run this script."
+fi
+services
+name="$(sed -n 's/^name *= *"\(.*\)".*/\1/p' "$REPO/config.toml" 2>/dev/null | head -1)"
+say "Done. Say \"Hey ${name:-Nova}\"."
