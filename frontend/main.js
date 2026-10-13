@@ -11,6 +11,7 @@ if (!app.requestSingleInstanceLock()) app.quit();
 let win = null;
 let tray = null;
 let muted = false;
+let status = "Not connected (is the backend running?)"; // set by the renderer
 
 // At login the backend may still be loading its models, so wait for it before using the defaults.
 async function guiConfig(tries = 30) {
@@ -65,13 +66,15 @@ app.whenReady().then(async () => {
   await createWindow();
   tray = new Tray(path.join(__dirname, "icon.png"));
   const menu = () => Menu.buildFromTemplate([
+    { label: status, enabled: false },
     { label: "Show / Hide", click: toggle },
     { label: "Mute microphone", type: "checkbox", checked: muted, click: (item) => { muted = item.checked; win.webContents.send("mute", muted); } },
     { type: "separator" },
     { label: "Quit", click: () => app.quit() },
   ]);
-  tray.setToolTip("voice-instinct");
-  tray.setContextMenu(menu());
+  const refresh = () => { tray.setToolTip(`voice-instinct: ${status}`); tray.setContextMenu(menu()); };
+  refresh();
+  ipcMain.on("status", (_e, text) => { status = text; refresh(); });
   if (process.argv.includes("--toggle")) toggle();
 });
 

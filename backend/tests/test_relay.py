@@ -410,3 +410,16 @@ def test_a_failing_wake_callback_must_not_stop_the_question():
         return n1, f"question_id={q2})" in str([m.get("content", "") for m in task.ctx.msgs])
 
     assert run(go()) == (1, True)
+
+
+def test_an_old_session_finishing_late_does_not_detach_the_new_one():
+    async def go():
+        reg, relay, old, ctx, bridge = setup("hi")
+        new = FakeTask(ctx)
+        relay.attach(new, ctx)  # fast reconnect: the new session attaches first
+        relay.detach(old)  # then the old pipeline's on_pipeline_finished lands
+        q = reg.add_question("s1", "permission", "ls", "Bash", {"command": "ls"})
+        await relay.raise_question(q)
+        return new
+
+    assert len(run(go()).frames) == 1

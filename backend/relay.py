@@ -104,7 +104,9 @@ class Relay:
                 self._queue.append(q["id"])
         await self._pump()
 
-    def detach(self):
+    def detach(self, task=None):
+        if task is not None and task is not self._task:
+            return  # a session that already ended; a newer one is attached
         if self._grace is not None:
             self._grace.cancel()
             self._grace = None

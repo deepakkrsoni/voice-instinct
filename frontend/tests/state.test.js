@@ -33,3 +33,13 @@ test("losing the backend hides the orb instead of freezing it", () => {
 test("unknown events change nothing", () => {
   assert.deepEqual(run("wake", "nonsense"), run("wake"));
 });
+
+const { statusFor } = require("../renderer/state.js");
+
+test("the tray says whether it is connected and why the microphone failed", () => {
+  assert.equal(statusFor({ type: "connected" }), "Connected");
+  assert.equal(statusFor({ type: "disconnected" }), "Not connected (is the backend running?)");
+  assert.equal(statusFor({ type: "device-error", reason: "permissions" }), "Microphone unavailable: permissions");
+  assert.equal(statusFor({ type: "device-error", reason: "not-found" }), "Microphone unavailable: not-found");
+  assert.equal(statusFor({ type: "wake" }), null); // anything else leaves the status alone
+});

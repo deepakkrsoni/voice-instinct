@@ -36,3 +36,9 @@ def make_wake(phrases, timeout, send) -> ProgrammaticWake:
         await send({"type": "sleep"})
 
     return w
+
+
+def handle_client_message(wake: ProgrammaticWake, msg) -> None:
+    """The desktop app sends "wake" when the user shows the orb by hand, so it can hear them."""
+    if msg.type == "wake":
+        wake.wake("shown")

@@ -5,7 +5,7 @@ import { createRoot } from "react-dom/client";
 import { Orb } from "orb-ui";
 import { createPipecatAdapter } from "orb-ui/adapters";
 
-const { initial, reduce } = require("./state.js");
+const { initial, reduce, statusFor } = require("./state.js");
 const { makeReconnector } = require("./reconnect.js");
 
 const backend = new URLSearchParams(location.search).get("backend") || "http://127.0.0.1:7860";
@@ -13,22 +13,28 @@ let state = initial();
 const root = createRoot(document.getElementById("root"));
 let muted = false; // owned by the tray in main.js; re-applied after every connect
 
-function dispatch(type) {
+function dispatch(type, extra) {
   const before = state;
   state = reduce(state, { type });
   if (state.visible !== before.visible) window.vi.setVisible(state.visible);
+  const status = statusFor({ type, ...extra });
+  if (status) window.vi.setStatus(status);
 }
 
 const client = new PipecatClient({ transport: new SmallWebRTCTransport({ mediaManager: new WavMediaManager() }), enableMic: true, enableCam: false });
 client.on(RTVIEvent.Connected, () => { dispatch("connected"); client.enableMic(!muted); });
 client.on(RTVIEvent.Disconnected, () => { dispatch("disconnected"); reconnector.trigger(); });
 client.on(RTVIEvent.ServerMessage, (msg) => { if (msg && (msg.type === "wake" || msg.type === "sleep")) dispatch(msg.type); });
+client.on(RTVIEvent.DeviceError, (err) => dispatch("device-error", { reason: err?.type || "unknown" }));
 client.on(RTVIEvent.UserStartedSpeaking, () => dispatch("user-start"));
 client.on(RTVIEvent.UserStoppedSpeaking, () => dispatch("user-stop"));
 client.on(RTVIEvent.BotStartedSpeaking, () => dispatch("bot-start"));
 client.on(RTVIEvent.BotStoppedSpeaking, () => dispatch("bot-stop"));
 
-window.vi.onToggle(() => dispatch("toggle"));
+window.vi.onToggle(() => {
+  dispatch("toggle");
+  if (state.visible && state.connected) client.sendClientMessage("wake"); // shown by hand: let it hear you
+});
 window.vi.onMute((m) => { muted = m; client.enableMic(!muted); });
 
 // The adapter drives the orb's look from RTVI events; our code owns connect/retry. adapter.start()

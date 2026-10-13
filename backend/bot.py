@@ -31,7 +31,7 @@ from registry import Registry
 from relay import Relay, make_bridge_tools, start_session
 from services import ParakeetSTTService, build_llm, kokoro_paths, parakeet_dir
 from shutdown import cancel_on_exit
-from wake import make_wake
+from wake import handle_client_message, make_wake
 
 load_dotenv(REPO_ROOT / ".env")
 
@@ -155,9 +155,13 @@ async def bot(runner_args: RunnerArguments):
     async def on_client_disconnected(transport, client):
         await runner.cancel()
 
+    @worker.rtvi.event_handler("on_client_message")
+    async def on_client_message(rtvi, msg):
+        handle_client_message(wake, msg)  # documented RTVI client message, sent when the orb is shown
+
     @worker.event_handler("on_pipeline_finished")
     async def on_pipeline_finished(worker, frame):
-        relay.detach()  # runs for graceful and cancelled shutdowns alike
+        relay.detach(worker)  # graceful and cancelled alike; never a newer session's relay
 
     sessions.add(runner)
     cancel_on_exit(sessions)

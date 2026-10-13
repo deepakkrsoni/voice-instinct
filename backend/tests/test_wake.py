@@ -16,7 +16,9 @@ from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies, default_user_turn_start_strategies
 from pipecat.utils.time import time_now_iso8601
 
-from wake import make_wake
+from types import SimpleNamespace
+
+from wake import handle_client_message, make_wake
 
 
 def said(text):
@@ -114,3 +116,16 @@ def test_keep_awake_extends_the_window_while_awake_then_it_sleeps():
     mid, sent, w = asyncio.run(go())
     assert mid["awake"] and {"type": "sleep"} not in mid["sent"]
     assert {"type": "sleep"} in sent and not w.awake
+
+
+def test_showing_the_orb_by_hand_wakes_it_so_it_can_hear_you():
+    # Tray "Show / Hide" or `voice-instinct toggle` sends the documented RTVI client message "wake".
+    msg = SimpleNamespace(type="wake", data=None)
+    users, _, sent, _ = asyncio.run(converse(["what's on today"], before=lambda w: handle_client_message(w, msg)))
+    assert users == ["what's on today"] and sent[0]["type"] == "wake"
+
+
+def test_other_client_messages_do_not_wake_it():
+    msg = SimpleNamespace(type="set-language", data={})
+    users, _, sent, _ = asyncio.run(converse(["what's on today"], before=lambda w: handle_client_message(w, msg)))
+    assert users == [] and sent == []

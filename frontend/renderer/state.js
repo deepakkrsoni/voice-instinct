@@ -29,4 +29,12 @@ function reduce(state, event) {
   }
 }
 
-module.exports = { initial, reduce };
+// What the tray says about the connection; null leaves it unchanged.
+function statusFor(event) {
+  if (event.type === "connected") return "Connected";
+  if (event.type === "disconnected") return "Not connected (is the backend running?)";
+  if (event.type === "device-error") return `Microphone unavailable: ${event.reason}`;
+  return null;
+}
+
+module.exports = { initial, reduce, statusFor };
