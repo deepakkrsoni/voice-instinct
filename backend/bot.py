@@ -10,6 +10,7 @@ from autonomy import sandbox_settings
 from claude_cli import ClaudeCodeBackend
 from config import REPO_ROOT, load
 from delegate import make_tools
+from gui import make_gui_router
 from hooks import HookBridge, hide_hook_tokens, load_token, make_router, write_run_settings
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.pipeline.pipeline import Pipeline
@@ -20,6 +21,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMUserAggregatorParams,
 )
 from pipecat.runner.run import app
+from pipecat.turns.user_turn_strategies import UserTurnStrategies, default_user_turn_start_strategies
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.kokoro.tts import KokoroTTSService
@@ -28,6 +30,7 @@ from pipecat.workers.runner import WorkerRunner
 from registry import Registry
 from relay import Relay, make_bridge_tools, start_session
 from services import ParakeetSTTService, build_llm, kokoro_paths, parakeet_dir
+from wake import make_wake
 
 load_dotenv(REPO_ROOT / ".env")
 
@@ -41,6 +44,7 @@ HOOK_TOKEN = load_token(DATA / "hook-token")
 # Documented extension point (Running Bots Locally > Adding your own routes): the runner exports
 # its FastAPI app, so hooks share the voice page's process, event loop and port.
 app.include_router(make_router(bridge, HOOK_TOKEN))
+app.include_router(make_gui_router(cfg))
 logging.getLogger("uvicorn.access").addFilter(hide_hook_tokens)  # the token is in the URL
 
 SYSTEM_PROMPT = (
@@ -91,11 +95,24 @@ async def bot(runner_args: RunnerArguments):
         settings=KokoroTTSService.Settings(voice="af_heart"),
     )
 
+    holder = {}
+
+    async def send_gui(msg):
+        if "worker" in holder:
+            await holder["worker"].rtvi.send_server_message(msg)
+
+    wake = make_wake(cfg.wake_phrases, cfg.awake_timeout, send_gui)
+    relay.on_question = lambda: wake.wake("question")
+
     context = LLMContext(tools=tools)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         # Defaults: Smart Turn v3 stop strategy (Speech Input & Turn Detection > Best Practices).
-        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+        user_params=LLMUserAggregatorParams(
+            vad_analyzer=SileroVADAnalyzer(),
+            # Documented: a wake phrase gates every turn; the defaults follow it.
+            user_turn_strategies=UserTurnStrategies(start=[wake, *default_user_turn_start_strategies()]),
+        ),
     )
 
     pipeline = Pipeline(
@@ -105,6 +122,7 @@ async def bot(runner_args: RunnerArguments):
         pipeline,
         params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
     )
+    holder["worker"] = worker
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
     await runner.add_workers(worker)
 
@@ -125,10 +143,11 @@ async def bot(runner_args: RunnerArguments):
     @assistant_aggregator.event_handler("on_assistant_turn_stopped")
     async def on_assistant_turn_stopped(aggregator, *args):
         relay.bot_turn(False)
+        wake.keep_awake()  # the user can reply without the phrase
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
-        await start_session(relay, worker, context)  # attaches the relay first, then greets
+        await start_session(relay, worker, context)  # attaches the relay; no greeting
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

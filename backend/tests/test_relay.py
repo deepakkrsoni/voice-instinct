@@ -265,7 +265,7 @@ class RecordingContext(FakeContext):
         self.msgs.append(m)
 
 
-def test_start_session_attaches_the_relay_and_greets_with_an_llm_run():
+def test_start_session_attaches_the_relay_without_speaking():
     async def go():
         reg = Registry()
         relay, ctx = Relay(reg), RecordingContext()
@@ -274,34 +274,21 @@ def test_start_session_attaches_the_relay_and_greets_with_an_llm_run():
         return relay, task
 
     relay, task = run(go())
-    assert relay._task is task
-    assert any(isinstance(f, LLMRunFrame) for f in task.frames)
+    assert relay._task is task and not any(isinstance(f, LLMRunFrame) for f in task.frames)
 
 
-def test_a_failing_greeting_must_not_leave_the_relay_detached():
-    # The demo failure: the greeting raised, and the relay (attached after it) never was,
-    # so Claude's permission questions were never spoken and timed out into denials.
-    class BrokenGreetingTask(FakeTask):
-        async def queue_frames(self, frames):
-            if any(isinstance(f, LLMRunFrame) for f in frames):
-                raise AttributeError("greeting exploded")
-            await super().queue_frames(frames)
-
+def test_start_session_still_speaks_a_question_that_was_waiting():
     async def go():
         reg = Registry()
         reg.upsert_session("s1")
         q = reg.add_question("s1", "permission", "ls", "Bash", {"command": "ls"})
         relay, ctx = Relay(reg), RecordingContext()
-        task = BrokenGreetingTask(ctx)
-        try:
-            await start_session(relay, task, ctx)
-        except AttributeError:
-            pass
-        return relay, task, q
+        task = FakeTask(ctx)
+        await start_session(relay, task, ctx)
+        return task, q
 
-    relay, task, q = run(go())
-    assert relay._task is task
-    assert any(f"question_id={q})" in m.get("content", "") for m in task.ctx.msgs)  # still spoken
+    task, q = run(go())
+    assert any(f"question_id={q})" in m.get("content", "") for m in task.ctx.msgs)
 
 
 def _raise_one(relay, reg):
@@ -383,3 +370,22 @@ def test_bridge_tools_are_declared_async_so_barge_in_never_cancels_them():
     reg, relay, task, ctx, bridge = setup()
     for fn in make_bridge_tools(bridge, relay, reg, FakeBackend()):
         assert fn._pipecat_cancel_on_interruption is False, fn.__name__
+
+
+def test_a_question_wakes_the_assistant_before_it_is_spoken():
+    async def go():
+        reg, relay, task, ctx, bridge = setup("hi")
+        order = []
+        relay.on_question = lambda: order.append("woke")
+        orig = task.queue_frames
+
+        async def spy(frames):
+            order.append("spoken")
+            await orig(frames)
+
+        task.queue_frames = spy
+        q = _raise_one(relay, reg)
+        await relay.raise_question(q)
+        return order
+
+    assert run(go()) == ["woke", "spoken"]

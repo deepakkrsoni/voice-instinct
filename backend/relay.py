@@ -6,7 +6,7 @@ import time
 
 from confirm import classify, last_user_text
 from pipecat.adapters.schemas.direct_function import tool_options
-from pipecat.frames.frames import LLMMessagesAppendFrame, LLMRunFrame
+from pipecat.frames.frames import LLMMessagesAppendFrame
 from pipecat.services.llm_service import FunctionCallParams
 
 
@@ -60,6 +60,7 @@ class Relay:
         self.quiet_grace = 15.0
         self._user_active = self._bot_active = self._force = False
         self._grace = None
+        self.on_question = None  # called before a question is spoken (wakes the orb)
 
     def attach(self, task, context):
         self._task, self._context = task, context
@@ -134,17 +135,17 @@ class Relay:
                 continue
             self._current = qid
             text = frame_question(q, self.reg.get_session(q["session_id"]))
+            if self.on_question:
+                self.on_question()
             await self._task.queue_frames(
                 [LLMMessagesAppendFrame(messages=[{"role": "developer", "content": text}], run_llm=True)]
             )
 
 
 async def start_session(relay, task, context):
-    """Run when the client connects. Attach first: a failure while greeting must never leave
-    the relay detached, or Claude's permission questions go unspoken and time out into denials."""
+    """Run when the orb connects: attach the relay (raising any waiting question). No greeting:
+    the desktop app reconnects silently; it speaks only when woken or when Claude needs the user."""
     await relay.attach_and_pump(task, context)
-    context.add_message({"role": "developer", "content": "Greet the user in one short sentence."})
-    await task.queue_frames([LLMRunFrame()])
 
 
 def make_bridge_tools(bridge, relay, registry, backend):
