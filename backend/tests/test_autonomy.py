@@ -112,3 +112,8 @@ def test_errand_browser_is_offered_only_with_its_own_chromium(tmp_path):
     (vi / "browser/browsers").mkdir()
     server = browser_mcp(tmp_path)["mcpServers"]["browser"]
     assert server["env"] == {"PLAYWRIGHT_BROWSERS_PATH": str(vi / "browser/browsers")}  # self-contained
+
+
+def test_large_shell_output_stays_inline_because_its_overflow_file_is_unreadable():
+    # Claude Code saves output past the inline limit under ~/.claude, which the agent cannot read.
+    assert sandbox_settings(HOME, APP, DATA)["bashOutputMaxChars"] == 128000

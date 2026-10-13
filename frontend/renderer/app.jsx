@@ -6,7 +6,7 @@ import { Orb } from "orb-ui";
 import { createPipecatAdapter } from "orb-ui/adapters";
 
 const { initial, reduce, statusLine } = require("./state.js");
-const { makeReconnector } = require("./reconnect.js");
+const { makeReconnector, makeWatchdog } = require("./reconnect.js");
 
 const backend = new URLSearchParams(location.search).get("backend") || "http://127.0.0.1:7860";
 let state = initial();
@@ -33,6 +33,9 @@ client.on(RTVIEvent.DeviceError, (err) => { micError = err?.type || "unknown"; d
 client.on(RTVIEvent.TrackStarted, (track, participant) => {
   if (participant?.local && track.kind === "audio" && micError) { micError = null; dispatch("mic-ok"); }
 });
+// A stalled session (media stopped without a Disconnected) is torn down so the reconnector takes over.
+const watchdog = makeWatchdog(() => { console.warn("session stalled; reconnecting"); client.disconnect(); });
+client.on(RTVIEvent.TransportStateChanged, (s) => watchdog.state(s));
 client.on(RTVIEvent.UserStartedSpeaking, () => dispatch("user-start"));
 client.on(RTVIEvent.UserStoppedSpeaking, () => dispatch("user-stop"));
 client.on(RTVIEvent.BotStartedSpeaking, () => dispatch("bot-start"));

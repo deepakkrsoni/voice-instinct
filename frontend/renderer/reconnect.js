@@ -28,4 +28,22 @@ function makeReconnector(connect, schedule = setTimeout, { start = 1000, max = 3
   return { trigger, succeeded: () => { delay = start; } };
 }
 
-module.exports = { makeReconnector };
+// Stall watchdog: the transport can leave "ready" (media stopped, peer dropped) without ever reporting
+// Disconnected. If it is not back to "ready" within `ms`, `restart` runs. "disconnected" is excluded:
+// the reconnector already handles a real disconnect. Unit-tested.
+function makeWatchdog(restart, schedule = setTimeout, cancel = clearTimeout, ms = 15000) {
+  let timer = null;
+  let live = false; // reached "ready" since the last disconnect: a first connect is never cut short
+  return {
+    state(s) {
+      if (s === "ready" || s === "disconnected") {
+        live = s === "ready";
+        if (timer) { cancel(timer); timer = null; }
+      } else if (live && !timer) {
+        timer = schedule(() => { timer = null; restart(); }, ms);
+      }
+    },
+  };
+}
+
+module.exports = { makeReconnector, makeWatchdog };

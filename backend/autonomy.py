@@ -57,6 +57,10 @@ def sandbox_settings(home, app_dir, data_dir, hook_port=7860) -> dict:
             "network": {"allowedDomains": [f"127.0.0.1:{hook_port}"], "strictAllowlist": True},
         },
         "permissions": {"deny": deny + list(_BROWSER_DENY)},
+        # Output past the inline limit is saved under ~/.claude, which the agent cannot read: keep it
+        # inline up to the maximum. ponytail: past 128k chars it is still unreadable; give the agent a
+        # readable overflow dir if real errands hit that.
+        "bashOutputMaxChars": 128000,
         # The user's own instructions are for their own sessions, not for errands.
         "claudeMdExcludes": [str(home / "CLAUDE.md"), str(home / "CLAUDE.local.md")],
     }

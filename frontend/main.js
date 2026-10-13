@@ -1,6 +1,8 @@
 // Electron main process: a hidden, frameless, transparent orb window; tray; single-instance toggle.
 const { app, BrowserWindow, Tray, Menu, ipcMain, screen, session } = require("electron");
 const path = require("node:path");
+const fs = require("node:fs");
+const os = require("node:os");
 const { trayItems } = require("./tray.js");
 
 const BACKEND = "http://127.0.0.1:7860"; // the page's CSP allows only this backend
@@ -12,6 +14,12 @@ if (!app.requestSingleInstanceLock() || process.argv.includes("--quit")) {
   app.exit(0); // the running instance got our argv (--toggle / --quit); or nothing is running to quit
   return;
 }
+
+// The page's console (connection events, errors; never what was said) goes to a file, so a dead or
+// stalled orb can be diagnosed. Started fresh once it passes 1 MB.
+const LOG = path.join(os.homedir(), ".voice-instinct", "frontend.log");
+try { if (fs.statSync(LOG).size > 1e6) fs.truncateSync(LOG); } catch {}
+const log = (line) => fs.appendFile(LOG, `${new Date().toISOString()} ${line}\n`, { mode: 0o600 }, () => {});
 
 let win = null;
 let tray = null;
@@ -59,6 +67,10 @@ function createWindow() {
     webPreferences: { preload: path.join(__dirname, "preload.js"), contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
   win.setAlwaysOnTop(true, "floating");
+  win.webContents.on("console-message", (e) => log(`[${e.level}] ${e.message}`));
+  // A crashed or frozen page cannot reconnect itself: reload it (it reconnects on load).
+  win.webContents.on("render-process-gone", (_e, d) => { log(`page gone: ${d.reason}; reloading`); win.reload(); });
+  win.webContents.on("unresponsive", () => { log("page unresponsive; reloading"); win.webContents.forcefullyCrashRenderer(); win.reload(); });
   win.webContents.on("did-finish-load", () => {
     win.webContents.send("mute", muted); // page reloads forget it
     loaded = true;
