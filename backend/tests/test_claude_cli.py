@@ -170,3 +170,10 @@ def test_the_configured_key_is_hidden_even_without_a_standard_name(tmp_path, mon
     monkeypatch.setenv("MY_GEMINI", "secret")  # [model] api_key_env = "MY_GEMINI"
     cli = _script(tmp_path, 'printf \'{"type":"result","result":"[%s]"}\\n\' "$MY_GEMINI"\n')
     assert asyncio.run(ClaudeCodeBackend(cmd=cli, hide_env=("MY_GEMINI",)).run("x")).text == "[]"
+
+
+def test_the_agent_gets_none_of_the_users_own_mcp_servers(tmp_path):
+    # Without this it inherits every MCP server in ~/.claude.json: other projects' logged-in browsers,
+    # Slack, Drive, messaging. An errand agent reading untrusted pages must not reach any of them.
+    cli = _script(tmp_path, 'printf \'{"type":"result","result":"%s"}\\n\' "$*"\n')
+    assert "--strict-mcp-config" in asyncio.run(ClaudeCodeBackend(cmd=cli).run("t")).text

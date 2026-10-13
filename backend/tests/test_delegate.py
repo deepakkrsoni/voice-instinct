@@ -1,9 +1,17 @@
 import asyncio
 from types import SimpleNamespace
 
+import pytest
+
 from claude_cli import BackendResult
 from delegate import make_tools
 from registry import Registry
+
+
+@pytest.fixture(autouse=True)
+def private_home(tmp_path, monkeypatch):
+    # delegate() defaults to ~/.voice-instinct/workspace: tests must never create folders in the real one.
+    monkeypatch.setenv("HOME", str(tmp_path))
 
 
 class FakeBackend:

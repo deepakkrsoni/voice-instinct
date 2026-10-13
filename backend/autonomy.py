@@ -27,7 +27,7 @@ def _rule(p: Path, home: Path) -> str:
         return "/" + p.as_posix()
 
 
-def sandbox_settings(home, app_dir, data_dir) -> dict:
+def sandbox_settings(home, app_dir, data_dir, hook_port=7860) -> dict:
     home, app_dir, data_dir = Path(home), Path(app_dir), Path(data_dir)
     dirs = [home / d for d in _SECRET_DIRS] + [data_dir / "runs"]
     files = [home / f for f in _SECRET_FILES] + [
@@ -45,6 +45,9 @@ def sandbox_settings(home, app_dir, data_dir) -> dict:
             "autoAllowBashIfSandboxed": True,  # sandboxed shell commands need no prompt
             "allowUnsandboxedCommands": False,  # and cannot be retried outside the sandbox
             "filesystem": {"denyRead": [_fs(p, home) for p in dirs + files]},
+            # The sandbox proxy refuses loopback unless listed, so without this every hook POST to this
+            # app got HTTP 403 and permission questions never reached the user.
+            "network": {"allowedDomains": [f"127.0.0.1:{hook_port}"]},
         },
         "permissions": {"deny": deny},
     }

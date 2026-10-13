@@ -5,6 +5,8 @@ its private `_transition_to_awake` / `_refresh_timeout`, and `hold` overrides `_
 (all pinned by tests against Pipecat 1.12).
 """
 
+from loguru import logger
+
 from pipecat.turns.user_start import WakePhraseUserTurnStartStrategy
 from pipecat.turns.user_start.wake_phrase_user_turn_start_strategy import _WakeState
 
@@ -52,10 +54,12 @@ def make_wake(phrases, timeout, send, hold=lambda: False) -> ProgrammaticWake:
 
     @w.event_handler("on_wake_phrase_detected")
     async def _woke(strategy, phrase):
+        logger.info(f"awake ({phrase})")  # markers only: never what was said
         await send({"type": "wake", "reason": "question" if phrase == "question" else "phrase"})
 
     @w.event_handler("on_wake_phrase_timeout")
     async def _slept(strategy):
+        logger.info("asleep")
         await send({"type": "sleep"})
 
     return w

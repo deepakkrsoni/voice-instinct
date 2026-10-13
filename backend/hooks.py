@@ -4,6 +4,7 @@ import asyncio
 import hmac
 import json
 import os
+import re
 import secrets
 from pathlib import Path
 
@@ -51,6 +52,7 @@ class HookBridge:
 
     async def on_permission_request(self, p):
         sid = p["session_id"]
+        logger.info(f"hook PermissionRequest ({sid[:8]})")
         self.reg.upsert_session(sid, cwd=p.get("cwd"))
         self.reg.add_event(sid, "PermissionRequest", p)
         qid = self.reg.add_question(sid, "permission", describe(p.get("tool_name"), p.get("tool_input")),
@@ -117,8 +119,14 @@ def make_router(bridge, token):
 
 
 def hide_hook_tokens(record):
-    """Logging filter for uvicorn's access log: hook URLs carry the secret token."""
-    return "/hook/" not in record.getMessage()
+    """Logging filter for uvicorn's access log: keep hook calls (a refused one must be visible) but
+    blank out the secret token in their URL."""
+    if isinstance(record.args, tuple):
+        record.args = tuple(re.sub(r"/hook/[^/]+/", "/hook/…/", a) if isinstance(a, str) else a
+                            for a in record.args)
+    elif "/hook/" in str(record.msg):
+        record.msg = re.sub(r"/hook/[^/]+/", "/hook/…/", str(record.msg))
+    return True
 
 
 def load_token(path):

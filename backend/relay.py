@@ -155,6 +155,7 @@ class Relay:
     def question_closed(self, qid, expired=False):
         self._queue = [q for q in self._queue if q != qid]
         was_asked = self._current == qid
+        logger.info(f"question {qid} closed{' (expired)' if expired else ''}")
         if was_asked:
             self._current = None
         if expired and was_asked and self._task is not None:  # the user must not think it went ahead
@@ -180,6 +181,7 @@ class Relay:
             if not q or q["status"] != "open":
                 continue
             self._current = qid
+            logger.info(f"question {qid} asked")
             text = frame_question(q, self.reg.get_session(q["session_id"]))
             if self.on_question:
                 try:

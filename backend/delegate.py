@@ -53,6 +53,7 @@ def make_tools(backend, registry, settings_for, on_finish=None, workspace_root=N
             state["session"], state["cwd"] = sid, str(wd)
             registry.upsert_session(sid, origin="delegated", mode="headless", state="running", cwd=str(wd))
             task_id = registry.create_task(sid, task)
+            logger.info(f"task {task_id} started (session {sid[:8]})")
             # Intermediate result (documented: is_final=False). run_llm=True on it is not in the docs
             # (source honours it): without it Gemini calls the tool and says nothing, so the user hears silence.
             await params.result_callback(
@@ -75,6 +76,7 @@ def make_tools(backend, registry, settings_for, on_finish=None, workspace_root=N
                 if on_finish:  # a run that ended can no longer use an answer
                     on_finish(sid)
             status = "error" if res.is_error else "done"
+            logger.info(f"task {task_id} {'stopped' if res.stopped else status}")
             registry.finish_task(task_id, status, res.text[:500])
             if res.stopped:  # the user stopped it: the next errand starts fresh, never resumes this one
                 state["session"] = state["cwd"] = None

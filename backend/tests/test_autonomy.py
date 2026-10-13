@@ -46,3 +46,9 @@ def test_run_settings_carry_the_sandbox_alongside_the_hooks_and_stay_private(tmp
     cfg = json.loads(open(path).read())
     assert "PermissionRequest" in cfg["hooks"] and cfg["sandbox"]["enabled"] is True
     assert cfg["permissions"]["deny"] and stat.S_IMODE(os.stat(path).st_mode) == 0o600
+
+
+def test_the_sandbox_lets_hooks_reach_this_app_and_nothing_else_local():
+    # Claude Code's sandbox proxy refuses loopback unless it is listed: hooks got HTTP 403 without this.
+    net = sandbox_settings(HOME, APP, DATA, hook_port=7860)["sandbox"]["network"]
+    assert net["allowedDomains"] == ["127.0.0.1:7860"]

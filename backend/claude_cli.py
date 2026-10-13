@@ -90,7 +90,8 @@ class ClaudeCodeBackend:
             return BackendResult(text="The Claude CLI is not installed.", is_error=True)
         tools = ",".join([*READ_ONLY_TOOLS, *extra_allowed])
         args = [self.cmd, "-p", "--output-format", "stream-json", "--verbose",
-                "--allowedTools", tools]
+                "--allowedTools", tools,
+                "--strict-mcp-config"]  # none of the user's own MCP servers (their browsers, Slack, mail)
         if session_id:
             args += ["--resume" if resume else "--session-id", session_id]
         if settings:

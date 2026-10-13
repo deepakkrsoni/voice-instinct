@@ -187,9 +187,12 @@ def test_settings_file_is_private_and_access_log_hides_tokens(tmp_path):
 
     path = write_run_settings(tmp_path, "s", "tok", 7860)
     assert stat.S_IMODE(__import__("os").stat(path).st_mode) == 0o600
-    hook_line = logging.LogRecord("uvicorn.access", 20, "", 0, '"POST /hook/tok/Stop" 200', None, None)
-    other = logging.LogRecord("uvicorn.access", 20, "", 0, '"GET / HTTP/1.1" 200', None, None)
-    assert hide_hook_tokens(hook_line) is False and hide_hook_tokens(other) is True
+    fmt = '%s - "%s %s HTTP/%s" %d'  # uvicorn's access-log record
+    hook_line = logging.LogRecord("uvicorn.access", 20, "", 0, fmt, ("127.0.0.1:1", "POST", "/hook/sekret/Stop", "1.1", 403), None)
+    other = logging.LogRecord("uvicorn.access", 20, "", 0, fmt, ("127.0.0.1:1", "GET", "/", "1.1", 200), None)
+    # Hook calls stay in the log (a refused hook must be visible) with the token blanked out.
+    assert hide_hook_tokens(hook_line) is True and hide_hook_tokens(other) is True
+    assert "sekret" not in hook_line.getMessage() and "/hook/…/Stop" in hook_line.getMessage() and "403" in hook_line.getMessage()
 
 
 def test_a_timeout_tells_the_relay_the_question_expired_but_an_answer_does_not():

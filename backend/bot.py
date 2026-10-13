@@ -29,6 +29,7 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.kokoro.tts import KokoroTTSService
 from pipecat.transports.base_transport import TransportParams
+from pipecat.utils.text.markdown_text_filter import MarkdownTextFilter
 from pipecat.workers.runner import WorkerRunner
 from registry import Registry
 from relay import Relay, make_bridge_tools, start_session
@@ -101,7 +102,7 @@ async def bot(runner_args: RunnerArguments):
     llm = build_llm(cfg, SYSTEM_PROMPT if backend.available() else SYSTEM_PROMPT + NO_AGENT)
     tools = []
     if backend.available():
-        autonomy = sandbox_settings(Path.home(), REPO_ROOT, DATA)
+        autonomy = sandbox_settings(Path.home(), REPO_ROOT, DATA, hook_port=HOOK_PORT)
         settings_for = lambda sid: write_run_settings(
             DATA / "runs", sid, HOOK_TOKEN, HOOK_PORT, extra=autonomy,
             hook_timeout=int(cfg.permission_timeout) + 10)  # Claude must outwait our own question timeout
@@ -117,6 +118,9 @@ async def bot(runner_args: RunnerArguments):
         voices_path=str(voices_path),
         settings=KokoroTTSService.Settings(voice="af_heart"),
     )
+    # Documented TTS text transformer: never read markdown aloud (Claude's results arrive as tables).
+    markdown = MarkdownTextFilter()
+    tts.add_text_transformer(lambda text, _type: markdown.filter(text), "*")
 
     holder = {}
 
