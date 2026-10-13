@@ -74,7 +74,7 @@ function createWindow() {
   // A crashed or frozen page cannot reconnect itself: reload it (it reconnects on load).
   win.webContents.on("render-process-gone", (_e, d) => {
     log(`page gone: ${d.reason}`);
-    if (d.reason !== "clean-exit" && !win.isDestroyed()) setTimeout(() => win.reload(), 1000); // no tight crash loop
+    if (d.reason !== "clean-exit") setTimeout(() => { if (!win.isDestroyed()) win.reload(); }, 1000); // no tight crash loop
   });
   win.webContents.on("unresponsive", () => { log("page unresponsive; restarting it"); win.webContents.forcefullyCrashRenderer(); });
   win.webContents.on("did-finish-load", () => {
