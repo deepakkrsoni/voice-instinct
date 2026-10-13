@@ -8,8 +8,7 @@ machine. The project is early, so a small, well-tested change is worth more than
 - Pick an [open issue](https://github.com/deepakkrsoni/voice-instinct/issues). Issues labelled `needs-design` have open
   questions: comment with your approach before building, so we agree on the design first.
 - Scope is **errands only** (research, bookings, shopping, bills, subscriptions, reminders, calling
-  businesses). Coding assistants and general computer tasks are out of scope; see
-  [the scope spec](docs/superpowers/specs/2026-10-13-instinct-scope.md).
+  businesses). Coding assistants and general computer tasks are out of scope.
 - Smaller things welcome without an issue: docs, tests, making hardcoded model paths configurable,
   error messages, bug reports with steps to reproduce.
 

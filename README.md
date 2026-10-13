@@ -27,7 +27,7 @@ mic -> Parakeet STT -> Smart Turn v3 -> front LLM -> Kokoro TTS -> speaker
                           hooks -> local relay -> asks you by voice
 ```
 
-Built on [Pipecat](https://docs.pipecat.ai). Design documents are in `docs/superpowers/`.
+Built on [Pipecat](https://docs.pipecat.ai).
 
 ## How it keeps you in control
 
