@@ -73,7 +73,7 @@ SYSTEM_PROMPT = (
     "For any errand that needs the web or an account, call delegate(task) and say one short line "
     "like 'on it' first. Never buy, pay, book, cancel, or change an account without the user's "
     "explicit go-ahead in this conversation, after saying what it is and how much it costs. "
-    "If a delegate result is a question from the agent, such as a choice or a login code, ask the "
+    "If a delegate result is a question from the agent, such as a choice, ask the "
     "user and call delegate again with their reply. When you are told a session needs a decision, "
     "ask the user, then call answer_question after they answer. Use list_sessions to answer what "
     "you are working on and stop_session to stop one. Never claim a task is done unless a tool "
@@ -81,13 +81,10 @@ SYSTEM_PROMPT = (
 )
 
 def _browser_config():
-    """Path of the errand browser's MCP config, or None if install.sh has not set the browser up."""
+    """The errand browser's MCP config as inline JSON (--mcp-config takes it), or None if install.sh
+    has not set the browser up."""
     servers = browser_mcp(Path.home())
-    if servers is None:
-        return None
-    path = DATA / "browser-mcp.json"
-    path.write_text(json.dumps(servers))
-    return str(path)
+    return None if servers is None else json.dumps(servers)
 
 
 HOOK_PORT = 7860  # the runner's port: hooks post back to this same server

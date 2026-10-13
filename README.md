@@ -3,7 +3,7 @@
 A voice-first personal agent that runs on your own machine and handles everyday errands, in the
 spirit of [Instinct](https://techcrunch.com/2026/09/28/viral-ai-agent-instinct-raises-1b-series-c-at-a-10b-valuation/),
 the texting agent. You talk to it, it does the legwork, and it asks you by voice only when it needs a
-decision, a choice or a login code. Local and private, open source, bring your own model.
+decision or a choice. Local and private, open source, bring your own model.
 Not affiliated with Instinct.
 
 ## What it does
@@ -41,8 +41,10 @@ Built on [Pipecat](https://docs.pipecat.ai).
   and the front model's API key is removed from the agent's environment.
 - The agent browses in its own headless browser that starts empty for every errand and is never
   signed in to your accounts. It gets none of your other Claude Code tools or connectors.
-- Your yes or no is decided by code from your own words, never by the model, and only after it
-  actually asked you.
+- When Claude Code asks for permission, your yes or no is decided by code from your own words, never
+  by the model, and only after it actually asked you. Clicks and form entries in the errand browser
+  are not asked one by one: Claude Code's auto-mode safety checks approve or refuse them, and the
+  browser's tools that could run code or upload your files are turned off.
 - It is instructed never to buy, pay, book or cancel without your explicit go-ahead.
 - The microphone stays open so it can hear the wake phrase. What it hears is transcribed on your
   machine and thrown away until you say the phrase; it is not stored or sent anywhere.

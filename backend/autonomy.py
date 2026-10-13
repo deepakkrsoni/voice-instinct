@@ -7,8 +7,13 @@ locations are also denied through permission rules. Deny rules hold in every per
 
 from pathlib import Path
 
-_SECRET_DIRS = (".ssh", ".aws", ".gnupg", ".config/gh", ".config/gcloud", ".kube", ".docker")
-_SECRET_FILES = (".netrc", ".git-credentials", ".npmrc", ".pypirc")
+_SECRET_DIRS = (".ssh", ".aws", ".gnupg", ".config/gh", ".config/gcloud", ".kube", ".docker",
+                ".mozilla", ".config/chromium", ".config/google-chrome", ".password-store",
+                ".local/share/keyrings")  # logged-in browsers and keyrings
+_SECRET_FILES = (".netrc", ".git-credentials", ".npmrc", ".pypirc",
+                 ".claude/.credentials.json", ".claude.json")  # Claude's login; other MCP servers' secrets
+# The errand browser's tools that run code outside the sandbox or read local files into a page.
+_BROWSER_DENY = ("mcp__browser__browser_run_code_unsafe", "mcp__browser__browser_file_upload")
 
 
 def _fs(p: Path, home: Path) -> str:
@@ -47,21 +52,27 @@ def sandbox_settings(home, app_dir, data_dir, hook_port=7860) -> dict:
             "filesystem": {"denyRead": [_fs(p, home) for p in dirs + files]},
             # The sandbox proxy refuses loopback unless listed, so without this every hook POST to this
             # app got HTTP 403 and permission questions never reached the user.
-            "network": {"allowedDomains": [f"127.0.0.1:{hook_port}"]},
+            # strictAllowlist: in auto mode a command may otherwise name more hosts for the classifier.
+            "network": {"allowedDomains": [f"127.0.0.1:{hook_port}"], "strictAllowlist": True},
         },
-        "permissions": {"deny": deny},
+        "permissions": {"deny": deny + list(_BROWSER_DENY)},
+        # The user's own instructions are for their own sessions, not for errands.
+        "claudeMdExcludes": [str(home / "CLAUDE.md"), str(home / "CLAUDE.local.md")],
     }
 
 
 def browser_mcp(home):
     """The errand browser for --mcp-config, or None until install.sh has set it up.
 
-    Playwright MCP on the installer's own Node, headless, with a fresh in-memory profile each run
-    (--isolated): it is never signed in to the user's accounts and keeps nothing on disk.
+    Playwright MCP on the installer's own Node and its own Chromium, headless, with a fresh profile
+    each run (--isolated): never signed in to the user's accounts. Page snapshots it saves stay in
+    the errand's own folder.
     """
     vi = Path(home) / ".voice-instinct"
     node, cli = vi / "node/bin/node", vi / "browser/node_modules/@playwright/mcp/cli.js"
-    if not (node.exists() and cli.exists()):
+    browsers = vi / "browser/browsers"
+    if not (node.exists() and cli.exists() and browsers.is_dir()):
         return None
     return {"mcpServers": {"browser": {"type": "stdio", "command": str(node),
-                                       "args": [str(cli), "--browser", "chromium", "--headless", "--isolated"]}}}
+                                       "args": [str(cli), "--browser", "chromium", "--headless", "--isolated"],
+                                       "env": {"PLAYWRIGHT_BROWSERS_PATH": str(browsers)}}}}

@@ -64,8 +64,51 @@ def test_errand_browser_is_private_and_only_offered_once_installed(tmp_path):
     cli = vi / "browser/node_modules/@playwright/mcp/cli.js"
     cli.parent.mkdir(parents=True)
     cli.write_text("")
+    (vi / "browser/browsers").mkdir()
     server = browser_mcp(tmp_path)["mcpServers"]["browser"]
     assert server["command"] == str(vi / "node/bin/node") and server["args"][0] == str(cli)
     # A fresh in-memory profile each run: never signed in to anything, nothing kept on disk.
     assert "--isolated" in server["args"] and "--headless" in server["args"]
     assert "--user-data-dir" not in server["args"]
+
+
+def test_the_browsers_code_running_tools_are_denied_in_every_mode():
+    # browser_run_code_unsafe runs model-written JS in the MCP server process, outside the sandbox:
+    # an agent reading untrusted pages must never get it. Deny rules hold in every permission mode.
+    deny = sandbox_settings(HOME, APP, DATA)["permissions"]["deny"]
+    assert "mcp__browser__browser_run_code_unsafe" in deny and "mcp__browser__browser_file_upload" in deny
+
+
+def test_the_shell_cannot_reach_any_host_beyond_the_hook_port():
+    # In auto mode a command can name extra hosts for the classifier to approve; strict means it cannot.
+    assert sandbox_settings(HOME, APP, DATA)["sandbox"]["network"]["strictAllowlist"] is True
+
+
+def test_claudes_own_login_browser_profiles_and_keyrings_are_off_limits():
+    s = sandbox_settings(HOME, APP, DATA)
+    deny_read, rules = s["sandbox"]["filesystem"]["denyRead"], s["permissions"]["deny"]
+    for p in ("~/.claude/.credentials.json", "~/.claude.json", "~/.mozilla", "~/.config/chromium",
+              "~/.config/google-chrome", "~/.password-store", "~/.local/share/keyrings"):
+        assert p in deny_read, p
+    assert "Read(~/.claude/.credentials.json)" in rules and "Read(~/.mozilla/**)" in rules
+
+
+def test_the_users_own_claude_md_is_not_loaded_into_errands():
+    assert s_excludes(sandbox_settings(HOME, APP, DATA)) >= {str(HOME / "CLAUDE.md"), str(HOME / "CLAUDE.local.md")}
+
+
+def s_excludes(s):
+    return set(s["claudeMdExcludes"])
+
+
+def test_errand_browser_is_offered_only_with_its_own_chromium(tmp_path):
+    from autonomy import browser_mcp
+
+    vi = tmp_path / ".voice-instinct"
+    for f in ("node/bin/node", "browser/node_modules/@playwright/mcp/cli.js"):
+        (vi / f).parent.mkdir(parents=True, exist_ok=True)
+        (vi / f).write_text("")
+    assert browser_mcp(tmp_path) is None  # Chromium missing: no browser rather than one that always fails
+    (vi / "browser/browsers").mkdir()
+    server = browser_mcp(tmp_path)["mcpServers"]["browser"]
+    assert server["env"] == {"PLAYWRIGHT_BROWSERS_PATH": str(vi / "browser/browsers")}  # self-contained

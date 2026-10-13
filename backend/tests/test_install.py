@@ -324,4 +324,16 @@ def test_gnome_is_told_the_tray_needs_the_appindicator_extension(tmp_path):
 def test_install_sets_up_the_pinned_errand_browser(tmp_path):
     r, home = run_clean(tmp_path, "--dry-run")
     assert "@playwright/mcp@0.0.83" in r.stdout and f"{home}/.voice-instinct/browser" in r.stdout
+    assert f"PLAYWRIGHT_BROWSERS_PATH='{home}/.voice-instinct/browser/browsers'" in r.stdout  # purge removes it all
     assert "install chromium" in r.stdout
+
+
+def test_an_installed_errand_browser_is_kept_on_re_run(tmp_path):
+    # A re-run (an update) must not reinstall it, or fail offline before the service is refreshed.
+    home = tmp_path / "home"
+    m = home / ".voice-instinct/browser/node_modules/@playwright/mcp"
+    m.mkdir(parents=True)
+    (m / "package.json").write_text('{"version": "0.0.83"}')
+    (home / ".voice-instinct/browser/browsers").mkdir()
+    r, _ = run_clean(tmp_path, "--dry-run")
+    assert "keep errand browser" in r.stdout and "install chromium" not in r.stdout

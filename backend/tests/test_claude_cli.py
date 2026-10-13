@@ -183,3 +183,9 @@ def test_the_errand_browser_is_the_only_mcp_server_given(tmp_path):
     cli = _script(tmp_path, 'printf \'{"type":"result","result":"%s"}\\n\' "$*"\n')
     args = asyncio.run(ClaudeCodeBackend(cmd=cli, mcp_config="/vi/browser-mcp.json").run("t")).text
     assert "--strict-mcp-config" in args and "--mcp-config /vi/browser-mcp.json" in args
+
+
+def test_the_agent_loads_no_user_level_claude_settings_hooks_or_plugins(tmp_path):
+    # The user's ~/.claude/settings.json brings plugins and their SessionStart hooks into every errand.
+    cli = _script(tmp_path, 'printf \'{"type":"result","result":"%s"}\\n\' "$*"\n')
+    assert "--setting-sources project" in asyncio.run(ClaudeCodeBackend(cmd=cli).run("t")).text

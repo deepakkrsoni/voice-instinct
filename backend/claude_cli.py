@@ -93,7 +93,8 @@ class ClaudeCodeBackend:
         tools = ",".join([*READ_ONLY_TOOLS, *extra_allowed])
         args = [self.cmd, "-p", "--output-format", "stream-json", "--verbose",
                 "--allowedTools", tools,
-                "--strict-mcp-config"]  # none of the user's own MCP servers (their browsers, Slack, mail)
+                "--strict-mcp-config",  # none of the user's own MCP servers (their browsers, Slack, mail)
+                "--setting-sources", "project"]  # nor their ~/.claude settings, plugins or hooks
         if self.mcp_config:
             args += ["--mcp-config", self.mcp_config]
         if session_id:

@@ -205,7 +205,7 @@ uninstall() {
   if [ "$DRY" = 1 ]; then run systemctl --user daemon-reload
   else systemctl --user daemon-reload 2>/dev/null || true; fi
   if [ "$PURGE" = 1 ]; then say "remove data in $HOME_DIR/.voice-instinct (models, database, workspace)"; run rm -rf "$HOME_DIR/.voice-instinct"; fi
-  say "voice-instinct removed$([ "$PURGE" = 1 ] || echo '; ~/.voice-instinct is kept: your data, plus about 1.5 GB of models and Node (--purge deletes it)')"
+  say "voice-instinct removed$([ "$PURGE" = 1 ] || echo '; ~/.voice-instinct is kept: your data, plus about 2 GB of models, Node and the errand browser (--purge deletes it)')"
 }
 
 if [ "$UNINSTALL" = 1 ]; then uninstall; exit 0; fi
@@ -222,8 +222,13 @@ run sh -c "cd '$REPO/backend' && $UV sync --python 3.13"
 run sh -c "export PATH=\"$NODE_DIR/bin:\$PATH\"; cd '$REPO/frontend' && npm ci && node node_modules/electron/install.js && npm run build"
 # The errand browser: Playwright MCP (pinned; npm checks the registry's integrity hashes) and its Chromium.
 # The agent gets a fresh in-memory profile each run, never signed in to anything (backend/autonomy.py).
-BROWSER_DIR="$HOME_DIR/.voice-instinct/browser"
-run sh -c "export PATH=\"$NODE_DIR/bin:\$PATH\"; npm install --prefix '$BROWSER_DIR' --no-audit --no-fund @playwright/mcp@0.0.83 && node '$BROWSER_DIR/node_modules/playwright/cli.js' install chromium"
+BROWSER_DIR="$HOME_DIR/.voice-instinct/browser" BROWSER_MCP=0.0.83
+if grep -qs "\"version\": \"$BROWSER_MCP\"" "$BROWSER_DIR/node_modules/@playwright/mcp/package.json" && [ -d "$BROWSER_DIR/browsers" ]; then
+  say "keep errand browser (Playwright MCP $BROWSER_MCP)"
+else
+  # Chromium inside $BROWSER_DIR (not the shared ~/.cache/ms-playwright): --purge removes it all.
+  run sh -c "export PATH=\"$NODE_DIR/bin:\$PATH\" PLAYWRIGHT_BROWSERS_PATH='$BROWSER_DIR/browsers'; npm install --prefix '$BROWSER_DIR' --no-audit --no-fund @playwright/mcp@$BROWSER_MCP && node '$BROWSER_DIR/node_modules/playwright/cli.js' install chromium"
+fi
 # Ubuntu 24.04+ (AppArmor) blocks unprivileged user namespaces; Electron then needs its SUID sandbox helper.
 if [ "$(cat "${VI_USERNS_FILE:-/proc/sys/kernel/apparmor_restrict_unprivileged_userns}" 2>/dev/null)" = 1 ]; then
   helper="$REPO/frontend/node_modules/electron/dist/chrome-sandbox"
