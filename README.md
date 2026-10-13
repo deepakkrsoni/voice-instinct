@@ -20,6 +20,8 @@ Not affiliated with Instinct.
 - It is a Linux desktop app. The tray menu needs a desktop with a system tray (on GNOME, the
   AppIndicator extension); see [docs/sway.md](docs/sway.md) for Sway.
 
+To set it up, see [GETTING_STARTED.md](GETTING_STARTED.md).
+
 ## How it works
 
 ```
