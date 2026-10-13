@@ -47,4 +47,4 @@ const reconnector = makeReconnector(async () => {
   reconnector.succeeded();
 });
 reconnector.trigger();
-root.render(<Orb adapter={adapter} theme="cloud" interactive={false} aria-label="voice-instinct" />);
+root.render(<Orb adapter={adapter} theme="cloud" interactive={false} aria-label="voice-instinct" style={{ "--orb-ui-size": "100vmin" }} />);
