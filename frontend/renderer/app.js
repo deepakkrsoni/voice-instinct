@@ -33,6 +33,7 @@ window.vi.onToggle(() => dispatch("toggle"));
 window.vi.onMute((m) => { muted = m; client.enableMic(!muted); });
 
 const reconnector = makeReconnector(async () => {
+  client.enableMic(!muted); // mic follows mute before any audio can flow
   await client.connect({ webrtcRequestParams: { endpoint: `${backend}/api/offer` } });
   reconnector.succeeded();
 });

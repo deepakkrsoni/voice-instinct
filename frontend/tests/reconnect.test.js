@@ -22,20 +22,48 @@ test("trigger is ignored while a connect is in flight", async () => {
   r.trigger();
   timers[0].fn();
   await tick();
-  r.trigger();
-  assert.equal(timers.length, 1);
+  r.trigger(); // only records a re-arm; no new timer until the attempt settles
+  assert.equal(timers.length, 2); // retry timer + attempt timeout
   release();
   await tick();
-  r.trigger();
-  assert.equal(timers.length, 2);
+  assert.equal(timers.length, 3); // the recorded trigger re-armed one retry
 });
 
 test("delay doubles per failure up to max, and succeeded() resets it", async () => {
   const { r, timers } = setup(async () => { throw new Error("down"); });
   r.trigger();
-  for (let i = 0; i < 4; i++) { timers[i].fn(); await tick(); }
-  assert.deepEqual(timers.map((t) => t.ms), [1000, 2000, 4000, 4000, 4000]);
+  const retries = () => timers.filter((t) => t.ms !== 15000);
+  for (let i = 0; i < 4; i++) { retries()[i].fn(); await tick(); }
+  assert.deepEqual(retries().map((t) => t.ms), [1000, 2000, 4000, 4000, 4000]);
   r.succeeded();
-  timers[4].fn(); await tick();
-  assert.equal(timers[5].ms, 1000);
+  retries()[4].fn(); await tick();
+  assert.equal(retries()[5].ms, 1000);
+});
+
+test("a trigger during an in-flight connect re-arms one retry after it settles, even on success", async () => {
+  let release;
+  const { r, timers } = setup(() => new Promise((res) => (release = res)));
+  r.trigger();
+  timers[0].fn();
+  await tick();
+  r.trigger(); // Disconnected while connecting
+  r.trigger();
+  assert.equal(timers.length, 2); // retry timer + attempt timeout only
+  release();
+  await tick();
+  assert.equal(timers.length, 3);
+  assert.equal(timers[2].ms, 2000);
+});
+
+test("a hung connect times out and retries", async () => {
+  const { r, timers } = setup(() => new Promise(() => {}));
+  r.trigger();
+  timers[0].fn();
+  await tick();
+  assert.equal(timers[1].ms, 15000);
+  timers[1].fn(); // fire the attempt timeout
+  await tick();
+  assert.equal(timers.length, 3);
+  r.trigger(); // still one retry pending: ignored
+  assert.equal(timers.length, 3);
 });
