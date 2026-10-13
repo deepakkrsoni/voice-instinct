@@ -28,7 +28,7 @@ services and launcher (your data in `~/.voice-instinct` is kept), and `--uninsta
 
 ```
 cd backend && uv run pytest            # unit tests, no network, no models needed
-cd frontend && npm test                # Electron/orb-ui tests
+cd frontend && npm test                # frontend logic (state, tray, reconnect); no Electron needed
 cd backend && uv run pytest -m claude  # real-CLI tests; they use your Claude subscription
 ```
 

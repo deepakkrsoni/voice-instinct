@@ -15,8 +15,10 @@ Not affiliated with Instinct.
 - It hands errands to your own logged-in `claude` CLI as a tracked background task, runs it
   autonomously in a sandbox, and tells you the result.
 - When the task needs a go-ahead or an answer, it asks you aloud and carries on in the same run.
-- It does errands only: research, bookings, shopping, bills, subscriptions, reminders and calling
-  businesses. It declines coding and general computer tasks.
+- It is for errands, not coding or general computer tasks. Today that means research done on the web:
+  finding and comparing flights, products, plans and prices, and answering questions about them.
+- It is a Linux desktop app. The tray menu needs a desktop with a system tray (on GNOME, the
+  AppIndicator extension); see [docs/sway.md](docs/sway.md) for Sway.
 
 ## How it works
 
@@ -35,10 +37,13 @@ Built on [Pipecat](https://docs.pipecat.ai).
 
 - Shell commands run inside Claude Code's sandbox, can only write inside the task's own folder, and
   fail closed if the sandbox is unavailable.
-- Your secrets (`~/.ssh`, cloud credentials, this app's keys and database) are off limits to the agent.
+- Your secrets (`~/.ssh`, cloud credentials, this app's keys and database) are off limits to the agent,
+  and the front model's API key is removed from the agent's environment.
 - Your yes or no is decided by code from your own words, never by the model, and only after it
   actually asked you.
 - It is instructed never to buy, pay, book or cancel without your explicit go-ahead.
+- The microphone stays open so it can hear the wake phrase. What it hears is transcribed on your
+  machine and thrown away until you say the phrase; it is not stored or sent anywhere.
 - Speech recognition and synthesis run locally, and sessions and questions are logged only on your
   machine in `~/.voice-instinct/`, readable only by you. The models you choose see the conversation
   and the task (Gemini and Claude are cloud services); use Ollama for a local front model.

@@ -18,7 +18,8 @@ def test_secret_locations_are_unreadable_by_both_the_sandbox_and_the_file_tools(
     s = sandbox_settings(HOME, APP, DATA)
     deny_read, rules = s["sandbox"]["filesystem"]["denyRead"], s["permissions"]["deny"]
     for p in ("~/.ssh", "~/.aws", "~/.gnupg", "~/.config/gh", "~/.netrc", "~/voice-agent/.env",
-              "~/.voice-instinct/hook-token", "~/.voice-instinct/harness.db", "~/.voice-instinct/runs"):
+              "~/.voice-instinct/hook-token", "~/.voice-instinct/harness.db", "~/.voice-instinct/runs",
+              "~/.voice-instinct/harness.db-wal", "~/.voice-instinct/harness.db-shm"):  # WAL mode
         assert p in deny_read, p
     assert "Read(~/.ssh/**)" in rules and "Edit(~/.ssh/**)" in rules
     assert "Read(~/voice-agent/.env)" in rules and "Edit(~/.voice-instinct/hook-token)" in rules

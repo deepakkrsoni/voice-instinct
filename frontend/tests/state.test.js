@@ -34,12 +34,27 @@ test("unknown events change nothing", () => {
   assert.deepEqual(run("wake", "nonsense"), run("wake"));
 });
 
-const { statusFor } = require("../renderer/state.js");
+const { statusLine } = require("../renderer/state.js");
 
-test("the tray says whether it is connected and why the microphone failed", () => {
-  assert.equal(statusFor({ type: "connected" }), "Connected");
-  assert.equal(statusFor({ type: "disconnected" }), "Not connected (is the backend running?)");
-  assert.equal(statusFor({ type: "device-error", reason: "permissions" }), "Microphone unavailable: permissions");
-  assert.equal(statusFor({ type: "device-error", reason: "not-found" }), "Microphone unavailable: not-found");
-  assert.equal(statusFor({ type: "wake" }), null); // anything else leaves the status alone
+test("the tray says whether it is connected and keeps saying why the microphone failed", () => {
+  assert.equal(statusLine(true, null), "Connected");
+  assert.equal(statusLine(false, null), "Not connected (is the backend running?)");
+  // The mic error arrives before Connected (the transport connects anyway): it must not be overwritten.
+  assert.equal(statusLine(true, "permissions"), "Connected, but the microphone is unavailable (permissions)");
+  assert.equal(statusLine(false, "not-found"), "Not connected: the microphone is unavailable (not-found)");
+});
+
+test("showing the orb while disconnected marks it offline (the app hides it again shortly)", () => {
+  const s = reduce(initial(), { type: "toggle" });
+  assert.equal(s.visible, true);
+  assert.equal(s.mode, "offline");
+  const c = reduce(reduce(initial(), { type: "connected" }), { type: "toggle" });
+  assert.equal(c.mode, "listening");
+});
+
+test("when the backend is up but the session will not connect, the tray points at the microphone", () => {
+  // Without a usable mic the client fails before it reaches the backend, and no device error arrives.
+  assert.equal(statusLine(false, null, true), "Not connected: the backend is running, so check the microphone");
+  assert.equal(statusLine(false, "permissions", true), "Not connected: the microphone is unavailable (permissions)");
+  assert.equal(statusLine(false, null, false), "Not connected (is the backend running?)");
 });

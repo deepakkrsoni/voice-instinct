@@ -41,7 +41,7 @@ class Config:
     @property
     def wake_phrases(self) -> list[str]:
         words = " ".join(self.name.lower().split())
-        return [f"hey {words}", f"okay {words}"]
+        return [f"hey {words}", f"okay {words}", f"ok {words}"]  # STT writes both "okay" and "OK"
 
 
 def load(path=None) -> Config:
@@ -61,6 +61,10 @@ def load(path=None) -> Config:
         raise ValueError("config.toml: [gui] size must be a whole number of pixels from 48 to 1024")
     if isinstance(cfg.awake_timeout, bool) or not isinstance(cfg.awake_timeout, (int, float)) or cfg.awake_timeout <= 0:
         raise ValueError("config.toml: [assistant] awake_timeout must be a number of seconds above 0")
+    if cfg.provider not in ("gemini", "openai", "ollama"):
+        raise ValueError("config.toml: [model] provider must be gemini, openai or ollama")
+    if not 0 < cfg.permission_timeout < cfg.backend_timeout:
+        raise ValueError("config.toml: [agent] permission_timeout must be above 0 and below backend_timeout")
     if cfg.gui_position not in POSITIONS:
         raise ValueError(f"config.toml: [gui] position must be one of {', '.join(POSITIONS)}")
     return cfg

@@ -31,7 +31,8 @@ def sandbox_settings(home, app_dir, data_dir) -> dict:
     home, app_dir, data_dir = Path(home), Path(app_dir), Path(data_dir)
     dirs = [home / d for d in _SECRET_DIRS] + [data_dir / "runs"]
     files = [home / f for f in _SECRET_FILES] + [
-        app_dir / ".env", data_dir / "hook-token", data_dir / "harness.db"]
+        app_dir / ".env", data_dir / "hook-token", data_dir / "harness.db",
+        data_dir / "harness.db-wal", data_dir / "harness.db-shm"]  # WAL mode keeps recent writes here
     deny = []
     for p in dirs:
         deny += [f"Read({_rule(p, home)}/**)", f"Edit({_rule(p, home)}/**)"]

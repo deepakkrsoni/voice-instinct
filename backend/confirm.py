@@ -2,19 +2,23 @@
 
 import re
 
-_NO = {"no", "nope", "don't", "dont", "stop", "cancel", "never", "nevermind", "negative"}
+_NO = {"no", "nope", "don't", "dont", "never", "nevermind", "negative"}
+_NO_UNLESS_YES = {"stop", "cancel"}  # "cancel that" refuses, "yes, cancel it" approves a cancellation
 _YES = {"yes", "yeah", "yep", "yup", "sure", "ok", "okay", "confirm", "approved", "affirmative"}
 _YES_PHRASES = ("go ahead", "do it", "please do")
+# A question or a hesitation is never consent: asking again is the safe outcome.
+_UNSURE = {"what", "why", "how", "which", "where", "when", "who", "wait", "hold", "hang", "think", "maybe"}
 
 
 def classify(reply: str) -> str:
     text = re.sub(r"[^a-z' ]", " ", reply.lower())
     words = set(text.split())
-    if words & _NO or "never mind" in text:
-        return "no"  # any refusal wins: "yeah no" must not approve
-    if words & _YES or any(p in text for p in _YES_PHRASES):
-        return "yes"
-    return "unclear"
+    yes = bool(words & _YES) or any(p in text for p in _YES_PHRASES)
+    if words & _NO or "never mind" in text or (words & _NO_UNLESS_YES and not yes):
+        return "no"  # a refusal wins: "yeah no" must not approve
+    if "?" in reply or words & _UNSURE:
+        return "unclear"
+    return "yes" if yes else "unclear"
 
 
 def last_user_text(messages: list[dict]) -> str:

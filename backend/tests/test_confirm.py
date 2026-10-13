@@ -32,3 +32,20 @@ def test_user_turns_counts_only_user_messages():
     msgs = [{"role": "user", "content": "a"}, {"role": "assistant", "content": "b"},
             {"role": "developer", "content": "c"}, {"role": "user", "content": "d"}]
     assert user_turns(msgs) == 2 and user_turns([]) == 0
+
+
+def test_approving_a_cancellation_or_a_stop_is_a_yes():
+    # Cancelling subscriptions is a core errand: "yes, cancel it" approves it.
+    for s in ["Yes, cancel it.", "Yeah go ahead and cancel", "Yes, stop the subscription", "sure, cancel my plan"]:
+        assert classify(s) == "yes", s
+
+
+def test_a_question_or_a_hesitation_is_never_a_yes():
+    # A clarifying question must not approve; asking again is the safe outcome.
+    for s in ["Okay, what would that do?", "ok hold on", "okay... let me think", "yes? which one", "sure, wait"]:
+        assert classify(s) == "unclear", s
+
+
+def test_a_real_refusal_still_wins():
+    for s in ["yes no", "yeah, don't", "ok never mind", "no, cancel it", "nope, stop"]:
+        assert classify(s) == "no", s

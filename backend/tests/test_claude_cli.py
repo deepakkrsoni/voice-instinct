@@ -147,3 +147,20 @@ def test_run_uses_the_given_cwd_and_accept_edits_mode(tmp_path):
     assert cwd == str(work) and "--permission-mode acceptEdits" in args
     plain = asyncio.run(ClaudeCodeBackend(cmd=cli, permission_mode=None).run("t")).text
     assert "--permission-mode" not in plain
+
+
+def test_the_agent_does_not_inherit_this_apps_model_keys(tmp_path, monkeypatch):
+    # The agent reads untrusted web pages; it must not be able to read (and leak) the front model's key.
+    monkeypatch.setenv("GEMINI_API_KEY", "secret-gemini")
+    monkeypatch.setenv("OPENAI_API_KEY", "secret-openai")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "claude-own")  # Claude Code's own login must still work
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "claude-oauth")
+    cli = _script(tmp_path, 'printf \'{"type":"result","result":"%s|%s|%s|%s"}\\n\' "$GEMINI_API_KEY" "$OPENAI_API_KEY" "$ANTHROPIC_API_KEY" "$CLAUDE_CODE_OAUTH_TOKEN"\n')
+    assert asyncio.run(ClaudeCodeBackend(cmd=cli).run("x")).text == "||claude-own|claude-oauth"
+
+
+def test_a_cli_that_fails_without_a_result_says_why(tmp_path):
+    # e.g. logged out: the reason is on stderr, and the user should hear it instead of "the task failed".
+    cli = _script(tmp_path, 'echo "Invalid API key · Please run /login" >&2\nexit 1\n')
+    r = asyncio.run(ClaudeCodeBackend(cmd=cli).run("x"))
+    assert r.is_error and "Please run /login" in r.text

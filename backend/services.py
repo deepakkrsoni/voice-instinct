@@ -1,6 +1,7 @@
 """Pipecat services: local Parakeet STT (no built-in one exists) and the front-LLM builder."""
 
 import asyncio
+import functools
 import os
 from collections.abc import AsyncGenerator
 from pathlib import Path
@@ -28,6 +29,7 @@ def kokoro_paths(cfg) -> tuple[Path, Path]:
     return d / "kokoro-v1.0.onnx", d / "voices-v1.0.bin"
 
 
+@functools.cache  # one copy for every session: reconnects must not load the model again
 def _load_recognizer(model_dir: Path):
     import sherpa_onnx
 
@@ -75,8 +77,7 @@ class ParakeetSTTService(SegmentedSTTService):
         await self.start_processing_metrics()
         text = await asyncio.to_thread(self._decode, audio)
         await self.stop_processing_metrics()
-        if text:
-            logger.info(f"User: {text}")
+        if text:  # never logged: until the wake phrase this is whatever the room is saying
             yield TranscriptionFrame(text, self._user_id, time_now_iso8601())
 
 

@@ -55,7 +55,7 @@ distro_install() {
     *debian*|*ubuntu*) PKGS+=(xz-utils); PM=(sudo apt-get install -y "${PKGS[@]}") ;;
     *fedora*|*rhel*) PKGS+=(xz); PM=(sudo dnf install -y "${PKGS[@]}") ;;
     *) echo "Your distribution (${NAME:-unknown}) is not supported yet. Supported: Arch, Debian/Ubuntu, Fedora." >&2
-       echo "Install these yourself, then re-run: ${PKGS[*]}" >&2; exit 1 ;;
+       echo "Install these yourself, then re-run: ${PKGS[*]} xz" >&2; exit 1 ;;
   esac
   say "System packages (needs sudo): ${PKGS[*]}"
   if [ "$DRY" = 0 ]; then
@@ -137,13 +137,14 @@ sway_rule() {
   else
     say "swaymsg unavailable, so no resize/move; add to your config:  for_window [app_id=\"voice-instinct\"] $rule"
   fi
-  say "         and a key:        bindsym \$mod+n exec voice-instinct toggle"
-  say "         and, unless your config runs dex --autostart:  exec voice-instinct"
+  say "         and a key:        bindsym \$mod+n exec $LAUNCHER toggle"
+  say "         and, unless your config runs dex --autostart:  exec $LAUNCHER"
   say "         (details: docs/sway.md)"
 }
 
 services() {
-  local uvbin="$UV"
+  local uvbin="$UV" CLAUDE_BIN
+  CLAUDE_BIN="$(command -v claude || true)"  # the service's PATH may not reach it (npm-global, nvm)
   write "$UNIT" 644 <<EOF
 [Unit]
 Description=voice-instinct backend
@@ -157,15 +158,18 @@ RestartSec=3
 SuccessExitStatus=143
 Environment=PYTHONUNBUFFERED=1
 Environment=PATH=$HOME_DIR/.local/bin:/usr/local/bin:/usr/bin:/bin
+${CLAUDE_BIN:+Environment=VI_CLAUDE=$CLAUDE_BIN}
 
 [Install]
 WantedBy=default.target
 EOF
   write "$LAUNCHER" 755 <<EOF
 #!/usr/bin/env bash
-# voice-instinct launcher: "voice-instinct" starts the orb, "voice-instinct toggle" shows or hides it.
+# voice-instinct launcher: "voice-instinct" starts the orb, "voice-instinct toggle" shows or hides it,
+# "voice-instinct quit" quits it (for desktops without a tray).
 args=()
 [ "\${1:-}" = toggle ] && args=(--toggle)
+[ "\${1:-}" = quit ] && args=(--quit)
 # The real binary: node_modules/.bin/electron is a node script, and many desktops have no system node.
 exec "$REPO/frontend/node_modules/electron/dist/electron" "$REPO/frontend" "\${args[@]}"
 EOF
@@ -185,19 +189,23 @@ EOF
   fi
   case "${XDG_CURRENT_DESKTOP:-}${SWAYSOCK:+sway}${HYPRLAND_INSTANCE_SIGNATURE:+hyprland}" in
     *sway*) sway_rule ;;
-    *hyprland*|*Hyprland*) say "Hyprland: windowrulev2 = float, class:^(voice-instinct)\$ and windowrulev2 = pin, class:^(voice-instinct)\$, and exec-once = voice-instinct (Hyprland does not run XDG autostart)" ;;
+    *GNOME*) say "GNOME shows the tray icon (status, mute, quit) only with the AppIndicator extension (gnome-shell-extension-appindicator); without it, quit with: $LAUNCHER quit" ;;
+    *hyprland*|*Hyprland*) say "Hyprland: windowrulev2 = float, class:^(voice-instinct)\$ and windowrulev2 = pin, class:^(voice-instinct)\$, and exec-once = $LAUNCHER (Hyprland does not run XDG autostart)" ;;
   esac
 }
 
 uninstall() {
   # idempotent: a missing unit or no user systemd session must not stop the cleanup
+  if [ -x "$LAUNCHER" ] || [ "$DRY" = 1 ]; then  # the orb would keep running until logout
+    if [ "$DRY" = 1 ]; then run "$LAUNCHER" quit; else timeout 5 "$LAUNCHER" quit >/dev/null 2>&1 || true; fi
+  fi
   if [ "$DRY" = 1 ]; then run systemctl --user disable --now voice-instinct.service
   else systemctl --user disable --now voice-instinct.service 2>/dev/null || true; fi
   run rm -f "$UNIT" "$AUTOSTART" "$LAUNCHER"
   if [ "$DRY" = 1 ]; then run systemctl --user daemon-reload
   else systemctl --user daemon-reload 2>/dev/null || true; fi
   if [ "$PURGE" = 1 ]; then say "remove data in $HOME_DIR/.voice-instinct (models, database, workspace)"; run rm -rf "$HOME_DIR/.voice-instinct"; fi
-  say "voice-instinct removed$([ "$PURGE" = 1 ] || echo '; your data in ~/.voice-instinct is kept (use --purge to delete it)')"
+  say "voice-instinct removed$([ "$PURGE" = 1 ] || echo '; ~/.voice-instinct is kept: your data, plus about 1.5 GB of models and Node (--purge deletes it)')"
 }
 
 if [ "$UNINSTALL" = 1 ]; then uninstall; exit 0; fi
@@ -224,4 +232,11 @@ if ! command -v claude >/dev/null; then
 fi
 services
 name="$(cfgval name)"
-say "Done. Say \"Hey ${name:-Nova}\"."
+if [ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ]; then
+  # the orb, now; from the next login it starts by itself
+  if [ "$DRY" = 1 ]; then run "$LAUNCHER" quit; run setsid -f "$LAUNCHER"  # quit first: an update must run the new code
+  else timeout 5 "$LAUNCHER" quit >/dev/null 2>&1 || true; sleep 1; setsid -f "$LAUNCHER" >/dev/null 2>&1; fi
+  say "Done. Say \"Hey ${name:-Nova}\"."
+else
+  say "Done. Start the orb with $LAUNCHER (it starts by itself from your next login), then say \"Hey ${name:-Nova}\"."
+fi

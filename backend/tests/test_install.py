@@ -176,8 +176,8 @@ def test_sway_rule_uses_gui_size_and_output_width(tmp_path):
     if (REPO / "config.toml").exists():
         size = int(next((l.split("=")[1].split("#")[0] for l in (REPO / "config.toml").read_text().splitlines() if l.startswith("size")), size))
     assert f"resize set {size} {size}, move position {2560 - size - 24} 12" in out
-    assert "bindsym $mod+n exec voice-instinct toggle" in out
-    assert "exec voice-instinct" in out.replace("exec voice-instinct toggle", "")  # Sway has no XDG autostart
+    assert "bindsym $mod+n exec " in out and "/.local/bin/voice-instinct toggle" in out
+    assert "/.local/bin/voice-instinct\n" in out  # Sway has no XDG autostart: exec the launcher
 
 
 @pytest.mark.skipif(shutil.which("shellcheck") is None, reason="shellcheck not installed")
@@ -257,3 +257,61 @@ def test_electron_sandbox_helper_is_set_up_where_user_namespaces_are_restricted(
     r, _ = run_clean(tmp_path, "--dry-run", extra_env={"VI_USERNS_FILE": str(userns)})
     helper = "frontend/node_modules/electron/dist/chrome-sandbox"
     assert ("sudo chmod 4755" in r.stdout and helper in r.stdout) == (restricted == "1")
+
+
+def render_unit(tmp_path, claude_bin):
+    src = SCRIPT.read_text()
+    body = src.split('write "$UNIT" 644 <<EOF\n', 1)[1].split("\nEOF\n", 1)[0]
+    script = tmp_path / "render.sh"
+    script.write_text(f'REPO=/r; uvbin=/u; HOME_DIR=/h; CLAUDE_BIN="{claude_bin}"\ncat <<EOF\n{body}\nEOF\n')
+    return subprocess.run(["bash", str(script)], capture_output=True, text=True, check=True).stdout
+
+
+def test_the_service_is_told_where_claude_is_even_outside_the_default_path(tmp_path):
+    # npm-global or nvm installs live outside the unit's PATH; the installer's own shell can see them.
+    assert "Environment=VI_CLAUDE=/home/u/.nvm/bin/claude" in render_unit(tmp_path, "/home/u/.nvm/bin/claude")
+    assert "VI_CLAUDE" not in render_unit(tmp_path, "")
+
+
+def test_install_starts_the_orb_in_a_desktop_session_and_says_how_otherwise(tmp_path):
+    r, home = run_clean(tmp_path, "--dry-run", extra_env={"WAYLAND_DISPLAY": "wayland-1"})
+    launcher = str(home / ".local/bin/voice-instinct")
+    assert f"would run: setsid -f {launcher}" in r.stdout
+    r2, home2 = run_clean(tmp_path / "x", "--dry-run", extra_env={"WAYLAND_DISPLAY": "", "DISPLAY": ""})
+    assert "setsid" not in r2.stdout and f"Start the orb with {home2 / '.local/bin/voice-instinct'}" in r2.stdout
+
+
+def test_the_sway_hint_uses_the_launchers_full_path(tmp_path):
+    # ~/.local/bin is often not on the compositor's PATH.
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    (fake / "swaymsg").write_text('#!/bin/sh\necho \'[{"focused":true,"rect":{"width":1280}}]\'\n')
+    (fake / "swaymsg").chmod(0o755)
+    r, home = run_clean(tmp_path, "--dry-run", extra_env={"SWAYSOCK": "/x", "PATH": f"{fake}:{os.environ['PATH']}"})
+    assert f"exec {home / '.local/bin/voice-instinct'} toggle" in r.stdout
+
+
+def test_launcher_quit_asks_the_running_app_to_quit(tmp_path):
+    src = SCRIPT.read_text()
+    body = src.split('write "$LAUNCHER" 755 <<EOF\n', 1)[1].split("\nEOF\n", 1)[0]
+    repo = tmp_path / "repo"
+    dist = repo / "frontend" / "node_modules" / "electron" / "dist"
+    dist.mkdir(parents=True)
+    ran = tmp_path / "ran"
+    (dist / "electron").write_text(f'#!/bin/sh\necho "$@" > {ran}\n')
+    (dist / "electron").chmod(0o755)
+    launcher = tmp_path / "voice-instinct"
+    launcher.write_text(body.replace("\\$", "$").replace("$REPO", str(repo)))
+    subprocess.run(["/bin/bash", str(launcher), "quit"], check=True)
+    assert ran.read_text().split() == [str(repo / "frontend"), "--quit"]
+
+
+def test_uninstall_quits_the_running_orb_first(tmp_path):
+    home, env = uninstall_fixture(tmp_path)
+    out = subprocess.run(["bash", str(SCRIPT), "--uninstall", "--dry-run"], capture_output=True, text=True, env=env).stdout
+    assert f"would run: {home}/.local/bin/voice-instinct quit" in out
+
+
+def test_gnome_is_told_the_tray_needs_the_appindicator_extension(tmp_path):
+    r, _ = run_clean(tmp_path, "--dry-run", extra_env={"XDG_CURRENT_DESKTOP": "ubuntu:GNOME", "SWAYSOCK": ""})
+    assert "AppIndicator" in r.stdout and "voice-instinct quit" in r.stdout

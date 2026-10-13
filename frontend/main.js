@@ -7,8 +7,9 @@ const BACKEND = "http://127.0.0.1:7860"; // the page's CSP allows only this back
 const DEFAULTS = { name: "Nova", size: 128, position: "top-right" }; // same as backend/config.py
 app.setName("voice-instinct"); // Wayland app_id / X11 class, used by compositor window rules
 
-if (!app.requestSingleInstanceLock()) {
-  app.exit(0); // the running instance got our argv (--toggle) through "second-instance"
+// One request only: each one forwards our argv to the running instance ("second-instance").
+if (!app.requestSingleInstanceLock() || process.argv.includes("--quit")) {
+  app.exit(0); // the running instance got our argv (--toggle / --quit); or nothing is running to quit
   return;
 }
 
@@ -75,6 +76,7 @@ function createWindow() {
 
 app.on("second-instance", (_event, argv) => {
   if (argv.includes("--toggle")) toggle();
+  if (argv.includes("--quit")) app.quit();
 });
 
 app.whenReady().then(async () => {

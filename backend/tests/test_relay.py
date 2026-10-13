@@ -142,7 +142,9 @@ def test_no_denies_and_unclear_reasks_and_stale_ids_are_rejected():
         ctx.msgs.append({"role": "assistant", "content": "Claude wants to remove x. Okay?"})
         ctx.msgs.append({"role": "user", "content": "hmm what is that"})
         p, out = params(ctx)
-        await answer(p, q)
+        await answer(p, q)  # unclear: the question is put to the user again, with a fresh marker
+        await asyncio.sleep(0.01)
+        ctx.msgs.append({"role": "assistant", "content": "Should Claude remove x, yes or no?"})
         ctx.msgs.append({"role": "user", "content": "no don't"})
         await answer(p, q)
         await answer(p, 999)
@@ -463,3 +465,72 @@ def test_reattaching_the_same_session_does_not_ask_the_waiting_question_twice():
         return task
 
     assert len(run(go()).frames) == 1
+
+
+def test_a_yes_to_a_later_unrelated_question_does_not_approve():
+    # The user changes the subject; the assistant asks its own question; "yes" answers that one.
+    async def go():
+        reg, relay, task, ctx, bridge = setup("hi")
+        q = reg.add_question("s1", "permission", "edit", "Edit", {"file_path": "~/.bashrc"})
+        fut = asyncio.get_running_loop().create_future()
+        bridge._waiters[q] = fut
+        await relay.raise_question(q)
+        answer = make_bridge_tools(bridge, relay, reg, FakeBackend())[0]
+        ctx.msgs += [{"role": "assistant", "content": "Claude wants to edit your bashrc. Okay?"},
+                     {"role": "user", "content": "what time is it"},
+                     {"role": "assistant", "content": "It's 3pm. Want a reminder?"},
+                     {"role": "user", "content": "yes"}]
+        p, out = params(ctx)
+        await answer(p, q)
+        await asyncio.sleep(0.01)
+        return out, fut, task
+
+    out, fut, task = run(go())
+    assert out[-1]["status"] == "unclear" and not fut.done()
+    assert len(task.frames) == 2  # asked again, so a fresh answer is needed
+
+
+def test_a_question_that_expired_unanswered_is_reported_to_the_user():
+    async def go():
+        reg, relay, task, ctx, bridge = setup("hi")
+        q = reg.add_question("s1", "permission", "edit ~/.bashrc", "Edit", {"file_path": "~/.bashrc"})
+        await relay.raise_question(q)
+        reg.resolve_question(q, "expired", None)
+        relay.question_closed(q, expired=True)
+        await asyncio.sleep(0.01)
+        return task
+
+    task = run(go())
+    note = task.frames[-1].messages[0]["content"]
+    assert len(task.frames) == 2 and "not allowed" in note and "edit ~/.bashrc" in note
+
+
+def test_when_a_second_client_leaves_questions_go_back_to_the_one_still_connected():
+    # The orb is connected; the /client debug page connects, then closes. The orb must still be asked.
+    async def go():
+        reg, relay, orb, ctx, bridge = setup("hi")
+        page = FakeTask(ctx)
+        await relay.attach_and_pump(page, ctx)
+        relay.detach(page)
+        await asyncio.sleep(0.01)
+        q = reg.add_question("s1", "permission", "ls", "Bash", {"command": "ls"})
+        await relay.raise_question(q)
+        return orb, page
+
+    orb, page = run(go())
+    assert len(orb.frames) == 1 and page.frames == []
+
+
+def test_stop_session_with_a_blank_or_ambiguous_id_stops_nothing():
+    async def go():
+        reg, relay, task, ctx, bridge = setup("hi")
+        reg.upsert_session("s2", origin="delegated")
+        backend = FakeBackend()
+        stop = make_bridge_tools(bridge, relay, reg, backend)[2]
+        p, out = params(ctx)
+        await stop(p, "")
+        await stop(p, "s")  # matches s1 and s2
+        return out, backend
+
+    out, backend = run(go())
+    assert [o["status"] for o in out] == ["not_running", "not_running"] and backend.stopped == []

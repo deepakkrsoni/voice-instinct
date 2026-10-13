@@ -15,7 +15,8 @@ function reduce(state, event) {
     case "sleep":
       return { ...state, visible: false, mode: "hidden" };
     case "toggle":
-      return state.visible ? { ...state, visible: false, mode: "hidden" } : shown("listening");
+      if (state.visible) return { ...state, visible: false, mode: "hidden" };
+      return shown(state.connected ? "listening" : "offline");
     case "user-start":
       return state.visible ? shown("listening") : state;
     case "user-stop":
@@ -29,12 +30,13 @@ function reduce(state, event) {
   }
 }
 
-// What the tray says about the connection; null leaves it unchanged.
-function statusFor(event) {
-  if (event.type === "connected") return "Connected";
-  if (event.type === "disconnected") return "Not connected (is the backend running?)";
-  if (event.type === "device-error") return `Microphone unavailable: ${event.reason}`;
-  return null;
+// What the tray says: the connection, and a microphone error that a later "connected" must not hide.
+// backendUp: the backend answered after a failed connect, so the problem is on this side.
+function statusLine(connected, micError, backendUp = false) {
+  if (!connected && micError) return `Not connected: the microphone is unavailable (${micError})`;
+  if (!connected && backendUp) return "Not connected: the backend is running, so check the microphone";
+  if (!connected) return "Not connected (is the backend running?)";
+  return micError ? `Connected, but the microphone is unavailable (${micError})` : "Connected";
 }
 
-module.exports = { initial, reduce, statusFor };
+module.exports = { initial, reduce, statusLine };

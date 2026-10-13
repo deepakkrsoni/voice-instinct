@@ -52,8 +52,8 @@ def test_flat_legacy_file_still_works(tmp_path):
 
 
 def test_wake_phrases_follow_the_name_whatever_its_case_or_spacing():
-    assert Config(name=" Nova ").wake_phrases == ["hey nova", "okay nova"]
-    assert Config(name="Mister  Bean").wake_phrases == ["hey mister bean", "okay mister bean"]
+    assert Config(name=" Nova ").wake_phrases == ["hey nova", "okay nova", "ok nova"]
+    assert Config(name="Mister  Bean").wake_phrases == ["hey mister bean", "okay mister bean", "ok mister bean"]
 
 
 def test_bad_position_or_empty_name_fails_fast_with_a_clear_message(tmp_path):
@@ -84,3 +84,22 @@ def test_a_name_that_is_not_text_fails_fast_with_a_clear_message(tmp_path):
     f.write_text("[assistant]\nname = 7\n")
     with pytest.raises(ValueError, match="name"):
         load(f)
+
+
+def test_permission_timeout_must_be_shorter_than_the_backend_timeout(tmp_path):
+    # Otherwise the whole run is killed while the user is still being asked.
+    f = tmp_path / "c.toml"
+    f.write_text("[agent]\nbackend_timeout = 60\npermission_timeout = 90\n")
+    with pytest.raises(ValueError, match="permission_timeout"):
+        load(f)
+
+
+def test_an_unknown_provider_fails_fast(tmp_path):
+    f = tmp_path / "c.toml"
+    f.write_text('[model]\nprovider = "gemeni"\n')
+    with pytest.raises(ValueError, match="provider"):
+        load(f)
+
+
+def test_ok_spelled_the_way_speech_to_text_writes_it_also_wakes_it():
+    assert "ok nova" in Config().wake_phrases

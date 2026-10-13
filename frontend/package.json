@@ -8,7 +8,7 @@
   "scripts": {
     "build": "esbuild renderer/app.jsx --bundle --format=iife --platform=browser --jsx=automatic --outfile=renderer/bundle.js",
     "start": "npm run build && electron .",
-    "test": "node --test tests/"
+    "test": "node --test tests/*.test.js"
   },
   "dependencies": {
     "@pipecat-ai/client-js": "~1.13.1",

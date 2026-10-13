@@ -8,10 +8,10 @@ prints this rule with the numbers for your screen; add it to `~/.config/sway/con
 # voice-instinct orb: float, show on every workspace, no border, top-right under the bar
 for_window [app_id="voice-instinct"] floating enable, sticky enable, border none, resize set 128 128, move position 1128 12
 # optional: show or hide the orb from the keyboard
-bindsym $mod+n exec voice-instinct toggle
+bindsym $mod+n exec ~/.local/bin/voice-instinct toggle
 # start the orb at login (Sway does not run XDG autostart entries; skip this if your config
 # already has `exec dex --autostart`, which runs them)
-exec voice-instinct
+exec ~/.local/bin/voice-instinct
 ```
 
 Then run `swaymsg reload`. The rule applies the next time the orb appears.

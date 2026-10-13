@@ -1,6 +1,8 @@
 """Voice agent: Parakeet (local) -> Gemini Flash -> Kokoro (local). Run: uv run bot.py"""
 
 import logging
+import os
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -13,6 +15,7 @@ from delegate import make_tools
 from gui import make_gui_router
 from hooks import HookBridge, hide_hook_tokens, load_token, make_router, write_run_settings
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.frames.frames import TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -34,6 +37,9 @@ from shutdown import cancel_on_exit
 from wake import handle_client_message, make_wake
 
 load_dotenv(REPO_ROOT / ".env")
+# The journal keeps everything; DEBUG would fill it with every frame (VI_LOG_LEVEL=DEBUG to debug).
+logger.remove()
+logger.add(sys.stderr, level=os.environ.get("VI_LOG_LEVEL", "INFO"))
 
 cfg = load()
 DATA = Path(cfg.data_dir).expanduser()
@@ -67,6 +73,12 @@ SYSTEM_PROMPT = (
     "result says done."
 )
 
+NO_AGENT = (
+    " Right now Claude Code is not available on this computer, so you have no tools and cannot run "
+    "errands. If the user asks for one, say that Claude Code needs to be installed and logged in "
+    "first (run claude once in a terminal), then restart voice-instinct."
+)
+
 transport_params = {
     "webrtc": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
 }
@@ -76,14 +88,15 @@ async def bot(runner_args: RunnerArguments):
     transport = await create_transport(runner_args, transport_params)
 
     stt = ParakeetSTTService(model_dir=parakeet_dir(cfg))
-    backend = ClaudeCodeBackend(cwd=cfg.backend_cwd, timeout=cfg.backend_timeout,
-                                permission_mode=cfg.permission_mode)
-    llm = build_llm(cfg, SYSTEM_PROMPT)
+    backend = ClaudeCodeBackend(cmd=os.environ.get("VI_CLAUDE", "claude"), cwd=cfg.backend_cwd,
+                                timeout=cfg.backend_timeout, permission_mode=cfg.permission_mode)
+    llm = build_llm(cfg, SYSTEM_PROMPT if backend.available() else SYSTEM_PROMPT + NO_AGENT)
     tools = []
     if backend.available():
         autonomy = sandbox_settings(Path.home(), REPO_ROOT, DATA)
         settings_for = lambda sid: write_run_settings(
-            DATA / "runs", sid, HOOK_TOKEN, cfg.hook_port, extra=autonomy)
+            DATA / "runs", sid, HOOK_TOKEN, cfg.hook_port, extra=autonomy,
+            hook_timeout=int(cfg.permission_timeout) + 10)  # Claude must outwait our own question timeout
         # Tools declare their own options with @tool_options; LLMContext(tools=...) is the registration.
         tools = [*make_tools(backend, registry, settings_for, on_finish=bridge.expire_session,
                              workspace_root=Path(cfg.workspace_dir).expanduser()),
@@ -123,6 +136,9 @@ async def bot(runner_args: RunnerArguments):
     worker = PipelineWorker(
         pipeline,
         params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
+        # Documented default is 5 min, then the session is cancelled: that would kill a running errand
+        # and drop "Hey Nova" every few minutes. The app stays connected until it disconnects.
+        idle_timeout_secs=None,
     )
     holder["worker"] = worker
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
@@ -141,6 +157,7 @@ async def bot(runner_args: RunnerArguments):
     @assistant_aggregator.event_handler("on_assistant_turn_started")
     async def on_assistant_turn_started(aggregator, *args):
         relay.bot_turn(True)
+        wake.wake("reply")  # an errand's result or a note: show the orb and listen for the answer
 
     @assistant_aggregator.event_handler("on_assistant_turn_stopped")
     async def on_assistant_turn_stopped(aggregator, *args):
@@ -158,6 +175,13 @@ async def bot(runner_args: RunnerArguments):
     @worker.rtvi.event_handler("on_client_message")
     async def on_client_message(rtvi, msg):
         handle_client_message(wake, msg)  # documented RTVI client message, sent when the orb is shown
+
+    # Documented (Pipeline events): an error reaching the worker. A failed model call is otherwise
+    # silent: the orb thinks, then nothing, so say so.
+    @worker.event_handler("on_pipeline_error")
+    async def on_pipeline_error(worker, frame):
+        if frame.processor is llm:
+            await worker.queue_frames([TTSSpeakFrame("Sorry, I can't reach my language model right now.")])
 
     @worker.event_handler("on_pipeline_finished")
     async def on_pipeline_finished(worker, frame):
