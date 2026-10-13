@@ -8,6 +8,8 @@ Not affiliated with Instinct.
 
 ## What it does
 
+- It lives in the background. Say "Hey Nova" (configurable) and a floating orb appears, listens, thinks
+  and speaks, then hides again.
 - You talk to it in the browser. Speech-to-text (Parakeet) and text-to-speech (Kokoro) run locally,
   around a model of your choice: Gemini by default, or any OpenAI-compatible endpoint or Ollama.
 - It hands errands to your own logged-in `claude` CLI as a tracked background task, runs it
