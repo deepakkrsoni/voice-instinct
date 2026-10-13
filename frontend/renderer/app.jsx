@@ -47,4 +47,9 @@ const reconnector = makeReconnector(async () => {
   reconnector.succeeded();
 });
 reconnector.trigger();
-root.render(<Orb adapter={adapter} theme="cloud" interactive={false} aria-label="voice-instinct" style={{ "--orb-ui-size": "100vmin" }} />);
+// The wrapper is the drag handle and carries the hover effect (index.html); 80vmin leaves room for both.
+root.render(
+  <div className="orb-wrap">
+    <Orb adapter={adapter} theme="cloud" interactive={false} aria-label="voice-instinct" style={{ "--orb-ui-size": "80vmin" }} />
+  </div>
+);

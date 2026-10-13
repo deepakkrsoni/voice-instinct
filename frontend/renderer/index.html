@@ -7,7 +7,12 @@
   <style>
     html, body, #root { margin: 0; height: 100%; width: 100%; background: transparent; overflow: hidden; }
     #root { display: grid; place-items: center; }
-    .relative { position: relative } .h-full { height: 100% } .w-full { width: 100% }
+    /* Drag anywhere; on hover grow a little and glow. The mask feathers the canvas's jagged rim. */
+    .orb-wrap { border-radius: 50%; line-height: 0; -webkit-app-region: drag; cursor: grab;
+      transition: transform .25s ease, filter .25s ease; filter: drop-shadow(0 0 1.5px rgba(124,140,255,.45)); }
+    .orb-wrap:hover { transform: scale(1.06); filter: drop-shadow(0 0 7px rgba(150,165,255,.85)); }
+    .orb-wrap canvas { -webkit-mask-image: radial-gradient(circle closest-side, #000 96.5%, transparent 100%);
+      mask-image: radial-gradient(circle closest-side, #000 96.5%, transparent 100%); }
   </style>
 </head>
 <body>

@@ -3,7 +3,7 @@ const { app, BrowserWindow, Tray, Menu, ipcMain, screen, session } = require("el
 const path = require("node:path");
 
 const BACKEND = process.env.VI_BACKEND_URL || "http://127.0.0.1:7860";
-const DEFAULTS = { name: "Nova", size: 160, position: "bottom-right" };
+const DEFAULTS = { name: "Nova", size: 128, position: "top-right" }; // same as backend/config.py
 app.setName("voice-instinct"); // Wayland app_id / X11 class, used by compositor window rules
 
 if (!app.requestSingleInstanceLock()) app.quit();
@@ -12,13 +12,16 @@ let win = null;
 let tray = null;
 let muted = false;
 
-async function guiConfig() {
-  try {
-    const r = await fetch(`${BACKEND}/gui-config`);
-    return { ...DEFAULTS, ...(await r.json()) };
-  } catch {
-    return DEFAULTS;
+// At login the backend may still be loading its models, so wait for it before using the defaults.
+async function guiConfig(tries = 30) {
+  for (let i = 0; i < tries; i++) {
+    try {
+      const r = await fetch(`${BACKEND}/gui-config`);
+      if (r.ok) return { ...DEFAULTS, ...(await r.json()) };
+    } catch {}
+    await new Promise((res) => setTimeout(res, 1000));
   }
+  return DEFAULTS;
 }
 
 function placement(cfg) {
