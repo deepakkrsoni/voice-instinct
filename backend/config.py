@@ -27,8 +27,8 @@ class Config:
     model: str = "gemini-3.8-flash"
     base_url: str | None = None  # openai-compatible endpoint; ollama defaults to localhost
     api_key_env: str = "GEMINI_API_KEY"
-    gui_size: int = 160
-    gui_position: str = "bottom-right"
+    gui_size: int = 128
+    gui_position: str = "top-right"
     models_dir: str = "~/.voice-instinct/models"
     backend_cwd: str = str(Path.home())
     backend_timeout: float = 300  # must stay well above permission_timeout

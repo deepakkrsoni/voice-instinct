@@ -11,8 +11,8 @@ api_key_env = "GEMINI_API_KEY" # the key itself goes in .env, never here
 # base_url = "http://localhost:11434/v1"
 
 [gui]
-size = 160                    # orb size in pixels
-position = "bottom-right"     # bottom-right | bottom-left | top-right | top-left | center
+size = 128                    # orb size in pixels
+position = "top-right"        # bottom-right | bottom-left | top-right | top-left | center
 
 [paths]
 models_dir = "~/.voice-instinct/models"
