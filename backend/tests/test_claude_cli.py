@@ -189,3 +189,10 @@ def test_the_agent_loads_no_user_level_claude_settings_hooks_or_plugins(tmp_path
     # The user's ~/.claude/settings.json brings plugins and their SessionStart hooks into every errand.
     cli = _script(tmp_path, 'printf \'{"type":"result","result":"%s"}\\n\' "$*"\n')
     assert "--setting-sources project" in asyncio.run(ClaudeCodeBackend(cmd=cli).run("t")).text
+
+
+def test_a_run_can_use_its_own_browser_config(tmp_path):
+    cli = _script(tmp_path, 'printf \'{"type":"result","result":"%s"}\\n\' "$*"\n')
+    backend = ClaudeCodeBackend(cmd=cli, mcp_config="/vi/normal.json")
+    assert "--mcp-config /vi/debug.json" in asyncio.run(backend.run("t", mcp_config="/vi/debug.json")).text
+    assert "--mcp-config /vi/normal.json" in asyncio.run(backend.run("t")).text

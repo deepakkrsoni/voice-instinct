@@ -10,7 +10,7 @@ from loguru import logger
 
 import json
 
-from autonomy import browser_mcp, sandbox_settings
+from autonomy import browser_mcp, sandbox_settings, with_debug_record
 from claude_cli import ClaudeCodeBackend
 from config import REPO_ROOT, load
 from delegate import make_tools
@@ -39,6 +39,8 @@ from registry import Registry
 from relay import Relay, make_bridge_tools, start_session
 from services import ParakeetSTTService, build_llm, kokoro_paths, parakeet_dir
 from shutdown import cancel_on_exit
+from steps import StepHub
+from telegram import Telegram
 from wake import handle_client_message, make_wake
 
 load_dotenv(REPO_ROOT / ".env")
@@ -58,9 +60,11 @@ sessions = set()  # open sessions' runners, cancelled when the server is stopped
 relay = Relay(registry)
 bridge = HookBridge(registry, relay, cfg.permission_timeout)
 HOOK_TOKEN = load_token(DATA / "hook-token")
+# Debug mode (config [debug] browser_steps): every errand browser step screenshotted (steps.py).
+STEPS = StepHub(Path.home(), telegram=Telegram.from_env()) if cfg.debug_browser_steps else None
 # Documented extension point (Running Bots Locally > Adding your own routes): the runner exports
 # its FastAPI app, so hooks share the voice page's process, event loop and port.
-app.include_router(make_router(bridge, HOOK_TOKEN))
+app.include_router(make_router(bridge, HOOK_TOKEN, steps=STEPS))
 app.include_router(make_gui_router(cfg))
 refuse_other_origins(app, port=7860)  # no other web page may open a voice session (guard.py)
 logging.getLogger("uvicorn.access").addFilter(hide_hook_tokens)  # the token is in the URL
@@ -111,17 +115,20 @@ async def bot(runner_args: RunnerArguments):
     stt = ParakeetSTTService(model_dir=parakeet_dir(cfg))
     backend = ClaudeCodeBackend(cmd=os.environ.get("VI_CLAUDE", "claude"), cwd=cfg.backend_cwd,
                                 timeout=cfg.backend_timeout, permission_mode=cfg.permission_mode,
-                                hide_env=(cfg.api_key_env,), mcp_config=_browser_config())
+                                hide_env=(cfg.api_key_env, "TELEGRAM_CHAT_ID"),  # the bot token goes as *_TOKEN
+                                mcp_config=_browser_config())
     llm = build_llm(cfg, SYSTEM_PROMPT if backend.available() else SYSTEM_PROMPT + NO_AGENT)
     tools = []
     if backend.available():
         autonomy = sandbox_settings(Path.home(), REPO_ROOT, DATA, hook_port=HOOK_PORT)
-        settings_for = lambda sid: write_run_settings(
-            DATA / "runs", sid, HOOK_TOKEN, HOOK_PORT, extra=autonomy,
-            hook_timeout=int(cfg.permission_timeout) + 10)  # Claude must outwait our own question timeout
+        settings_for = lambda sid, debug_cwd=None: write_run_settings(
+            DATA / "runs", sid, HOOK_TOKEN, HOOK_PORT,
+            extra=autonomy if debug_cwd is None else with_debug_record(autonomy, debug_cwd, Path.home()),
+            hook_timeout=int(cfg.permission_timeout) + 10,  # Claude must outwait our own question timeout
+            step_hook=debug_cwd is not None)
         # Tools declare their own options with @tool_options; LLMContext(tools=...) is the registration.
         tools = [*make_tools(backend, registry, settings_for, on_finish=bridge.expire_session,
-                             workspace_root=Path(cfg.workspace_dir).expanduser()),
+                             workspace_root=Path(cfg.workspace_dir).expanduser(), steps=STEPS),
                  *make_bridge_tools(bridge, relay, registry, backend)]
     else:
         logger.warning("claude CLI not found; running front-model-only")

@@ -33,6 +33,22 @@ The commands below live in `~/.local/bin`; use the full path if that folder is n
 In `config.toml`, set `provider = "ollama"` and `model` to a model you have pulled (for example
 `qwen3:8b`). No API key is needed. Then restart both.
 
+## Debug mode: see every browser step
+
+To check what the agent does in the browser, set `browser_steps = true` under `[debug]` in
+`config.toml` and restart (`systemctl --user restart voice-instinct`). Every page-changing step of
+an errand (open a page, click, type, submit) is then screenshotted into the errand's folder, under
+`debug/`, with `steps.md` listing each step and how the errand ended. What the agent typed is never
+written down.
+
+To also get each screenshot in Telegram, create a bot with @BotFather, send it a message, and put
+its token and your chat id in `.env`:
+
+    TELEGRAM_BOT_TOKEN=123456:ABC...
+    TELEGRAM_CHAT_ID=123456789
+
+They go only to that one chat, and only in debug mode.
+
 ## If it doesn't respond
 
 - Check the tray status line: "Not connected" means the backend is down or still starting;
