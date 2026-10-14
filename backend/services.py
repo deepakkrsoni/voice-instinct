@@ -78,13 +78,46 @@ class ParakeetSTTService(SegmentedSTTService):
     def __init__(self, model_dir: Path | None = None, recognizer=None, **kwargs):
         super().__init__(
             sample_rate=16000,
+            ttfs_p99_latency=1.3,  # the 0.8 s pause plus decoding
             settings=STTSettings(model="parakeet-tdt-0.6b-v3", language=Language.EN),
             **kwargs,
         )
         self._rec = recognizer or _load_recognizer(model_dir)
+        self._cut = None
 
     def can_generate_metrics(self) -> bool:
         return True
+
+    # A VAD stop (0.2 s for Smart Turn) used to end every segment, so speech reached Parakeet a word at
+    # a time and was misheard (#19). Now a stop ends the segment only after PAUSE_SECS of silence.
+    # These override SegmentedSTTService's private handlers: pinned to Pipecat 1.12 by test_stt_parakeet.
+    PAUSE_SECS = 0.8
+
+    async def _handle_user_started_speaking(self, frame):
+        await self._cancel_cut()
+        await super()._handle_user_started_speaking(frame)
+
+    async def _handle_user_stopped_speaking(self, frame):
+        await self._cancel_cut()
+        self._cut = self.create_task(self._cut_after_pause(frame))
+
+    async def _cut_after_pause(self, frame):
+        await asyncio.sleep(self.PAUSE_SECS)
+        self._cut = None
+        await SegmentedSTTService._handle_user_stopped_speaking(self, frame)
+
+    async def _cancel_cut(self):
+        if self._cut is not None:
+            await self.cancel_task(self._cut)
+            self._cut = None
+
+    async def cancel(self, frame):
+        await self._cancel_cut()
+        await super().cancel(frame)
+
+    async def stop(self, frame):
+        await self._cancel_cut()
+        await super().stop(frame)
 
     def _decode(self, pcm: bytes) -> str:
         audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
