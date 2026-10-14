@@ -84,3 +84,33 @@ def test_database_and_its_directory_are_private(tmp_path):
     Registry(d / "harness.db")
     assert stat.S_IMODE(os.stat(d).st_mode) == 0o700
     assert stat.S_IMODE(os.stat(d / "harness.db").st_mode) == 0o600
+
+
+def test_the_conversation_round_trips_and_survives_a_restart(tmp_path):
+    db = tmp_path / "harness.db"
+    msgs = [{"role": "user", "content": "find t-shirts"}, {"role": "assistant", "content": "On it."}]
+    Registry(db).save_conversation(msgs)
+    assert Registry(db).load_conversation() == msgs  # a new Registry: as after a backend restart
+
+
+def test_no_conversation_yet_is_empty():
+    reg, _ = make()
+    assert reg.load_conversation() == []
+
+
+def test_a_corrupt_conversation_starts_empty_and_is_kept_aside(tmp_path):
+    db = tmp_path / "harness.db"
+    reg = Registry(db)
+    reg.save_conversation([{"role": "user", "content": "hi"}])
+    reg.db.execute("UPDATE conversation SET messages_json = '{not json' WHERE id = 1")
+    assert Registry(db).load_conversation() == []
+    bad = reg.db.execute("SELECT messages_json FROM conversation_bad").fetchall()
+    assert [r[0] for r in bad] == ["{not json"]
+
+
+def test_a_task_is_found_by_its_id():
+    reg, _ = make()
+    reg.upsert_session("s1", cwd="/w")
+    tid = reg.create_task("s1", "find t-shirts")
+    assert reg.get_task(tid)["session_id"] == "s1" and reg.get_task(tid)["request"] == "find t-shirts"
+    assert reg.get_task(tid + 99) is None

@@ -7,6 +7,8 @@ import sqlite3
 import time
 from pathlib import Path
 
+from loguru import logger
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions(
   id TEXT PRIMARY KEY, name TEXT, cwd TEXT,
@@ -25,6 +27,10 @@ CREATE TABLE IF NOT EXISTS questions(
   kind TEXT NOT NULL, tool_name TEXT, tool_input_json TEXT, input_hash TEXT NOT NULL,
   prompt TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open', answer TEXT,
   asked_at REAL NOT NULL, answered_at REAL);
+CREATE TABLE IF NOT EXISTS conversation(
+  id INTEGER PRIMARY KEY CHECK (id = 1), messages_json TEXT NOT NULL, updated_at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS conversation_bad(
+  id INTEGER PRIMARY KEY, messages_json TEXT NOT NULL, at REAL NOT NULL);
 CREATE INDEX IF NOT EXISTS events_by_session ON events(session_id, at);
 CREATE INDEX IF NOT EXISTS questions_by_status ON questions(status);
 """
@@ -80,6 +86,30 @@ class Registry:
         cur = self.db.execute("INSERT INTO tasks(session_id, request, created_at) VALUES(?,?,?)",
                               (session_id, request, self.clock()))
         return cur.lastrowid
+
+    def get_task(self, task_id):
+        return self._one("SELECT * FROM tasks WHERE id=?", (task_id,))
+
+    def save_conversation(self, messages):
+        """Nova's one ongoing conversation (conversation.py decides what is saved)."""
+        self.db.execute("INSERT INTO conversation(id, messages_json, updated_at) VALUES(1,?,?) "
+                        "ON CONFLICT(id) DO UPDATE SET messages_json=excluded.messages_json, "
+                        "updated_at=excluded.updated_at", (json.dumps(messages), self.clock()))
+
+    def load_conversation(self):
+        row = self._one("SELECT messages_json FROM conversation WHERE id=1")
+        if row is None:
+            return []
+        try:
+            messages = json.loads(row["messages_json"])
+            if isinstance(messages, list):
+                return messages
+        except ValueError:
+            pass
+        logger.warning("saved conversation is unreadable: starting a new one (kept in conversation_bad)")
+        self.db.execute("INSERT INTO conversation_bad(messages_json, at) VALUES(?,?)",
+                        (row["messages_json"], self.clock()))
+        return []
 
     def finish_task(self, task_id, status, summary=""):
         self.db.execute("UPDATE tasks SET status=?, summary=?, finished_at=? WHERE id=?",
