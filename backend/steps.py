@@ -1,13 +1,14 @@
-"""Debug mode (#17): every page-changing errand browser step is screenshotted, recorded in the errand
-folder and sent to Telegram.
+"""Debug mode (#17): every tool the errand agent uses is recorded in the errand folder and sent to
+Telegram, and every browser step that changes the page is screenshotted too.
 
 A PostToolUse hook (hooks.STEP_MATCHER) drives it and the agent's next step waits for the capture, so
 no step can be skipped. The record lives in <errand>/debug/<run>/: steps.md, one line per step as it
-happens (#7's action log can build on it), and 001.png, 002.png, ...
+happens (#7's action log can build on it), and 001.png, 002.png, ... for the browser steps.
 """
 
 import asyncio
 import json
+import re
 import time
 from pathlib import Path
 
@@ -17,18 +18,41 @@ from autonomy import browser_mcp
 from debugbrowser import headless_shell, launch, page_url, screenshot
 
 SHOT_TIMEOUT = 10  # seconds; the hook itself times out at 15 (hooks.write_run_settings)
+# The browser steps that change the page: these also get a screenshot.
+SCREENSHOT_TOOLS = re.compile("mcp__browser__browser_(navigate|navigate_back|click|type|fill_form|select_option"
+                              "|press_key|hover|drag|drop)")
 # Never typed text or form values: they may be passwords.
 _FIELDS = ("element", "url", "key", "startElement", "endElement")
+# Other tools: the one field that says what the step was. Never contents (Write's text, Edit's strings).
+_TOOL_FIELD = {"WebSearch": "query", "WebFetch": "url", "Read": "file_path",  # Bash: see _bash
+               "Write": "file_path", "Edit": "file_path", "Glob": "pattern", "Grep": "pattern",
+               "ToolSearch": "query"}
+
+
+def _bash(inp):
+    """A command without what it writes: its first line, cut at a heredoc, quoted strings masked, plus the
+    agent's own one-line description. ponytail: unquoted secrets (curl -u user:pass) still show; mask
+    by pattern if errands ever pass credentials on the command line."""
+    cmd = str(inp.get("command") or "").strip().split("\n", 1)[0].split("<<", 1)[0]
+    cmd = " ".join(re.sub(r"'[^']*'|\"[^\"]*\"", "…", cmd).split())
+    desc = str(inp.get("description") or "").strip()
+    return f"{cmd} ({desc})" if desc else cmd
 
 
 def action(tool_name, tool_input):
     """One line for a step: the tool and what it acted on."""
     inp = tool_input if isinstance(tool_input, dict) else {}
-    # A single key may be part of a password typed key by key; named keys (Enter, Tab) are kept.
-    parts = [str(inp[k]) for k in _FIELDS if inp.get(k) and not (k == "key" and len(str(inp[k])) == 1)]
-    if isinstance(inp.get("fields"), list):  # fill_form: the field names only
-        parts += [str(f["name"]) for f in inp["fields"] if isinstance(f, dict) and f.get("name")]
-    name = str(tool_name).removeprefix("mcp__browser__")
+    name = str(tool_name)
+    if name.startswith("mcp__browser__"):
+        # A single key may be part of a password typed key by key; named keys (Enter, Tab) are kept.
+        parts = [str(inp[k]) for k in _FIELDS if inp.get(k) and not (k == "key" and len(str(inp[k])) == 1)]
+        if isinstance(inp.get("fields"), list):  # fill_form: the field names only
+            parts += [str(f["name"]) for f in inp["fields"] if isinstance(f, dict) and f.get("name")]
+    elif name == "Bash":
+        parts = [_bash(inp)]
+    else:
+        parts = [str(inp[_TOOL_FIELD[name]])] if inp.get(_TOOL_FIELD.get(name, "")) else []
+    name = name.removeprefix("mcp__browser__")
     detail = " ".join(" ".join(parts).split())[:200]
     return f"{name}: {detail}" if detail else name
 
@@ -44,7 +68,7 @@ class StepRecorder:
             self.dir = base / f"{stamp}-{n}"
         self.dir.mkdir(parents=True)
         self.report, self.n, self.lines, self.started = self.dir / "steps.md", 0, [], time.monotonic()
-        self._append(f"# Browser steps, {time.strftime('%Y-%m-%d %H:%M')}\n")
+        self._append(f"# Errand steps, {time.strftime('%Y-%m-%d %H:%M')}\n")
 
     # Read-only between our writes: Playwright MCP runs outside the sandbox and can save snapshots and
     # screenshots under any name in the errand folder, so the Edit deny rule alone cannot protect them.
@@ -65,8 +89,8 @@ class StepRecorder:
         if png:
             (self.dir / shot).write_bytes(png)
             (self.dir / shot).chmod(0o444)
-        tail = f"→ {shot}" if png else f"(no screenshot: {error or 'unknown'})"
-        line = f"{self.n}. {time.strftime('%H:%M:%S')} {action(tool_name, tool_input)} {tail}"
+        tail = f" → {shot}" if png else f" (no screenshot: {error})" if error else ""  # "": not a browser step
+        line = f"{self.n}. {time.strftime('%H:%M:%S')} {action(tool_name, tool_input)}{tail}"
         self.lines.append(line)
         self._append(line)
         return line
@@ -75,7 +99,7 @@ class StepRecorder:
         """Write the footer; return the whole report for Telegram."""
         footer = f"{outcome}: {self.n} step{'' if self.n == 1 else 's'} in {round(time.monotonic() - self.started)} s"
         self._append(f"\n{footer}")
-        return "\n".join(["Browser steps", *self.lines, footer])
+        return "\n".join(["Errand steps", *self.lines, footer])
 
 
 class _Run:
@@ -112,15 +136,20 @@ class StepHub:
 
     async def on_step(self, p):
         run = self._runs.get(p.get("session_id"))
-        if run is None or run.browser is None:
+        if run is None:
             return {}
+        tool = str(p.get("tool_name", ""))
         png = error = None
-        try:
-            png = await asyncio.wait_for(
-                self._shoot(run.browser.port, page_url(p.get("tool_response"))), SHOT_TIMEOUT)
-        except Exception as e:  # timeouts too: record the step anyway, never block the errand
-            error = str(e) or type(e).__name__
-        line = run.rec.record(p.get("tool_name", ""), p.get("tool_input"), png, error)
+        if SCREENSHOT_TOOLS.fullmatch(tool):
+            if run.browser is None:
+                error = "debug capture off"
+            else:
+                try:
+                    png = await asyncio.wait_for(
+                        self._shoot(run.browser.port, page_url(p.get("tool_response"))), SHOT_TIMEOUT)
+                except Exception as e:  # timeouts too: record the step anyway, never block the errand
+                    error = str(e) or type(e).__name__
+        line = run.rec.record(tool, p.get("tool_input"), png, error)
         if self.telegram:
             self._send(self.telegram.send_photo(png, line) if png else self.telegram.send_message(line))
         return {}

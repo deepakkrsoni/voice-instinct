@@ -25,7 +25,8 @@ backend_timeout = 300
 permission_timeout = 90
 
 [debug]
-# Screenshot every browser step of an errand into its folder (debug/) and, if TELEGRAM_BOT_TOKEN and
+# Record every step of an errand (web searches, pages, commands) in its folder (debug/steps.md), with a
+# screenshot of each browser step that changes the page, and, if TELEGRAM_BOT_TOKEN and
 # TELEGRAM_CHAT_ID are in .env, send each one to your own Telegram chat.
 browser_steps = false
 
