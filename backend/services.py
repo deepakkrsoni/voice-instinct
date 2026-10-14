@@ -81,6 +81,28 @@ class ParakeetSTTService(SegmentedSTTService):
             yield TranscriptionFrame(text, self._user_id, time_now_iso8601())
 
 
+# The official sherpa-onnx int8 builds; install.sh downloads the configured one (same names there).
+STT_MODELS = {
+    "nemotron": "sherpa-onnx-nemotron-speech-streaming-en-0.6b-160ms-int8-2026-04-25",
+    "nemotron-multilingual": "sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-160ms-int8-2026-06-11",
+    "parakeet": PARAKEET_NAME,
+}
+
+
+def stt_dir(cfg) -> Path:
+    return Path(cfg.models_dir).expanduser() / STT_MODELS[cfg.stt_engine]
+
+
+def make_stt(cfg, recognizer=None):
+    """The configured speech-to-text service. recognizer: a fake for tests."""
+    d = stt_dir(cfg)
+    if recognizer is None and not d.is_dir():
+        raise RuntimeError(f"The {cfg.stt_engine} speech model is not installed ({d}). Run ./install.sh.")
+    if cfg.stt_engine == "parakeet":
+        return ParakeetSTTService(model_dir=d, recognizer=recognizer)
+    raise RuntimeError(f"The {cfg.stt_engine} engine is not available yet.")
+
+
 def build_llm(cfg, system_instruction: str):
     """Front LLM. Model and system prompt go through Settings (the documented 1.x way)."""
     key = os.environ.get(cfg.api_key_env, "ollama")
