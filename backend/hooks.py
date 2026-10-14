@@ -99,7 +99,7 @@ class HookBridge:
         return {}
 
 
-def make_router(bridge, token, steps=None):
+def make_router(bridge, token, steps=None, budget=None):
     router = APIRouter()
 
     @router.post("/hook/{tok}/{event}")
@@ -111,8 +111,10 @@ def make_router(bridge, token, steps=None):
         except Exception:
             return {}
         try:
-            if event == "PostToolUse":  # debug mode's browser steps (steps.py)
-                return await steps.on_step(payload) if steps else {}
+            if event == "PostToolUse":  # debug mode's step record (steps.py), then the time budget (budget.py)
+                if steps:
+                    await steps.on_step(payload)
+                return budget.on_step(payload) if budget else {}
             if event == "PermissionRequest" and payload.get("session_id"):
                 return await bridge.on_permission_request(payload)
             return await bridge.on_event(event, payload)
@@ -147,14 +149,15 @@ def load_token(path):
     return tok
 
 
-def write_run_settings(directory, session_id, token, port, hook_timeout=100, extra=None, step_hook=False):
+def write_run_settings(directory, session_id, token, port, hook_timeout=100, extra=None):
     d = Path(directory)
     d.mkdir(parents=True, exist_ok=True)
     url = f"http://127.0.0.1:{port}/hook/{token}"
     hooks = {e: [{"hooks": [{"type": "http", "timeout": hook_timeout, "url": f"{url}/{e}"}]}] for e in _EVENTS}
-    if step_hook:  # 15 s: the screenshot is capped at 10 (steps.SHOT_TIMEOUT)
-        hooks["PostToolUse"] = [{"matcher": STEP_MATCHER,
-                                 "hooks": [{"type": "http", "timeout": 15, "url": f"{url}/PostToolUse"}]}]
+    # Every run: the time budget answers through it, and in debug mode it also drives the step record.
+    # 15 s: a debug screenshot is capped at 10 (steps.SHOT_TIMEOUT).
+    hooks["PostToolUse"] = [{"matcher": STEP_MATCHER,
+                             "hooks": [{"type": "http", "timeout": 15, "url": f"{url}/PostToolUse"}]}]
     path = d / f"{session_id}.json"
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)  # the URL holds the token
     with os.fdopen(fd, "w") as f:

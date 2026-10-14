@@ -196,3 +196,11 @@ def test_a_run_can_use_its_own_browser_config(tmp_path):
     backend = ClaudeCodeBackend(cmd=cli, mcp_config="/vi/normal.json")
     assert "--mcp-config /vi/debug.json" in asyncio.run(backend.run("t", mcp_config="/vi/debug.json")).text
     assert "--mcp-config /vi/normal.json" in asyncio.run(backend.run("t")).text
+
+
+def test_errands_are_told_to_keep_research_proportionate(tmp_path):
+    # Task 11 opened product page after product page until it was cut off with no answer.
+    cli = _script(tmp_path, 'printf \'{"type":"result","result":"%s"}\\n\' "$*"\n')
+    args = asyncio.run(ClaudeCodeBackend(cmd=cli).run("t")).text
+    assert "--append-system-prompt" in args
+    assert "time limit" in args and "listing pages" in args and "Time check" in args

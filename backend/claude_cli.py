@@ -15,6 +15,14 @@ READ_ONLY_TOOLS = [
     "Bash(ls:*)", "Bash(du:*)", "Bash(stat:*)", "Bash(wc:*)", "Bash(cat:*)",
 ]
 
+# Appended to every errand's system prompt. Task 11 opened product page after product page until the
+# time limit cut it off with no answer; budget.py sends the "Time check" this refers to.
+ERRAND_GUIDANCE = (
+    "This errand runs against a time limit you cannot see. Keep research proportionate: prefer search "
+    "results and listing pages over opening many product pages one by one. If a Time check message says "
+    "time is nearly up, stop and give your best answer at once, saying what you could not check."
+)
+
 
 @dataclass
 class BackendResult:
@@ -94,6 +102,7 @@ class ClaudeCodeBackend:
         tools = ",".join([*READ_ONLY_TOOLS, *extra_allowed])
         args = [self.cmd, "-p", "--output-format", "stream-json", "--verbose",
                 "--allowedTools", tools,
+                "--append-system-prompt", ERRAND_GUIDANCE,
                 "--strict-mcp-config",  # none of the user's own MCP servers (their browsers, Slack, mail)
                 "--setting-sources", "project"]  # nor their ~/.claude settings, plugins or hooks
         mcp = mcp_config or self.mcp_config  # a debug run brings its own browser (steps.py)

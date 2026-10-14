@@ -318,3 +318,35 @@ def test_a_normal_errand_keeps_the_backends_own_browser():
     reg, b, delegate = setup([BackendResult("ok", "x")])
     run(delegate(make_params()[0], "find flights"))
     assert b.calls[0]["mcp_config"] is None
+
+
+class FakeBudget:
+    def __init__(self):
+        self.calls = []
+
+    def start(self, sid, timeout):
+        self.calls.append(("start", sid, timeout))
+
+    def finish(self, sid):
+        self.calls.append(("finish", sid))
+
+
+def test_every_errand_runs_against_the_backends_time_budget():
+    b, budget = FakeBackend([BackendResult("ok", "x")]), FakeBudget()
+    b.timeout = 900
+    (delegate,) = make_tools(b, Registry(), lambda sid: f"/settings/{sid}.json", budget=budget)
+    run(delegate(make_params()[0], "find t-shirts"))
+    sid = b.calls[0]["sid"]
+    assert budget.calls == [("start", sid, 900), ("finish", sid)]
+
+
+def test_a_cancelled_errand_still_closes_its_budget():
+    class Cancelled(FakeBackend):
+        async def run(self, task, **kw):
+            raise asyncio.CancelledError
+
+    budget = FakeBudget()
+    (delegate,) = make_tools(Cancelled([]), Registry(), lambda sid: f"/settings/{sid}.json", budget=budget)
+    with pytest.raises(asyncio.CancelledError):
+        run(delegate(make_params()[0], "find t-shirts"))
+    assert [c[0] for c in budget.calls] == ["start", "finish"]

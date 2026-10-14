@@ -232,11 +232,10 @@ def test_web_requests_are_described_in_words_not_json():
     assert describe("Edit", "not a dict").startswith("Edit")  # never crashes into a silent denial
 
 
-def test_the_step_hook_is_added_only_for_debug_runs(tmp_path):
-    plain = json.loads(Path(write_run_settings(tmp_path, "a", "tok", 7860)).read_text())
-    assert "PostToolUse" not in plain["hooks"]
-    debug = json.loads(Path(write_run_settings(tmp_path, "b", "tok", 7860, step_hook=True)).read_text())
-    (entry,) = debug["hooks"]["PostToolUse"]
+def test_every_run_gets_the_step_hook_for_the_time_budget(tmp_path):
+    # Not only debug runs: the time budget (budget.py) answers through it on every errand.
+    settings = json.loads(Path(write_run_settings(tmp_path, "a", "tok", 7860)).read_text())
+    (entry,) = settings["hooks"]["PostToolUse"]
     assert entry["matcher"] == STEP_MATCHER
     assert entry["hooks"][0]["url"] == "http://127.0.0.1:7860/hook/tok/PostToolUse"
     assert entry["hooks"][0]["timeout"] == 15
