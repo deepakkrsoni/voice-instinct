@@ -99,7 +99,7 @@ class HookBridge:
         return {}
 
 
-def make_router(bridge, token):
+def make_router(bridge, token, steps=None):
     router = APIRouter()
 
     @router.post("/hook/{tok}/{event}")
@@ -111,6 +111,8 @@ def make_router(bridge, token):
         except Exception:
             return {}
         try:
+            if event == "PostToolUse":  # debug mode's browser steps (steps.py)
+                return await steps.on_step(payload) if steps else {}
             if event == "PermissionRequest" and payload.get("session_id"):
                 return await bridge.on_permission_request(payload)
             return await bridge.on_event(event, payload)
