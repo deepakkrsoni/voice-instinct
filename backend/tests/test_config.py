@@ -52,8 +52,9 @@ def test_flat_legacy_file_still_works(tmp_path):
 
 
 def test_wake_phrases_follow_the_name_whatever_its_case_or_spacing():
-    assert Config(name=" Nova ").wake_phrases == ["hey nova", "okay nova", "ok nova"]
-    assert Config(name="Mister  Bean").wake_phrases == ["hey mister bean", "okay mister bean", "ok mister bean"]
+    assert Config(name=" Nova ").wake_phrases == ["hey nova", "okay nova", "ok nova", "hay nova"]
+    assert Config(name="Mister  Bean").wake_phrases == ["hey mister bean", "okay mister bean", "ok mister bean",
+                                                        "hay mister bean"]
 
 
 def test_bad_position_or_empty_name_fails_fast_with_a_clear_message(tmp_path):
@@ -117,3 +118,29 @@ def test_debug_browser_steps_must_be_true_or_false(tmp_path):
     p.write_text('[debug]\nbrowser_steps = "yes"\n')
     with pytest.raises(ValueError, match=r"\[debug\] browser_steps"):
         load(p)
+
+
+def test_stt_engine_defaults_to_nemotron_even_for_an_older_config(tmp_path):
+    p = tmp_path / "c.toml"
+    p.write_text('[assistant]\nname = "Nova"\n')  # a config.toml from before [stt] existed
+    assert load(p).stt_engine == "nemotron"
+
+
+def test_every_stt_engine_is_accepted_from_its_section(tmp_path):
+    from config import STT_ENGINES
+    p = tmp_path / "c.toml"
+    for engine in STT_ENGINES:
+        p.write_text(f'[stt]\nengine = "{engine}"\n')
+        assert load(p).stt_engine == engine
+
+
+def test_an_unknown_stt_engine_is_refused_with_the_choices(tmp_path):
+    p = tmp_path / "c.toml"
+    p.write_text('[stt]\nengine = "whisper"\n')
+    with pytest.raises(ValueError, match=r"\[stt\] engine must be one of nemotron, nemotron-multilingual, parakeet"):
+        load(p)
+
+
+def test_hay_spelled_the_way_nemotron_writes_hey_also_wakes_it():
+    # Probed 2026-10-14: Nemotron streaming transcribes Kokoro's "Hey Nova" as "Hay Nova".
+    assert "hay nova" in Config().wake_phrases

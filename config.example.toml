@@ -28,3 +28,10 @@ permission_timeout = 90
 # Screenshot every browser step of an errand into its folder (debug/) and, if TELEGRAM_BOT_TOKEN and
 # TELEGRAM_CHAT_ID are in .env, send each one to your own Telegram chat.
 browser_steps = false
+
+[stt]
+# Speech-to-text, all local: nemotron (English, streaming, default), nemotron-multilingual
+# (40 languages, streaming) or parakeet (the previous engine). Re-run ./install.sh after changing it:
+# it downloads only the engine chosen here (about 450 MB). Nemotron's weights are under the NVIDIA
+# Open Model License.
+engine = "nemotron"

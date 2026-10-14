@@ -25,9 +25,7 @@ case "$(uname -m)" in
   *) NODE_ARCH="" NODE_SHA="" ;;
 esac
 MODELS="$HOME_DIR/.voice-instinct/models"
-PARAKEET="sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
-PARAKEET_URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/$PARAKEET.tar.bz2"
-PARAKEET_SHA="5793d0fd397c5778d2cf2126994d58e9d56b1be7c04d13c7a15bb1b4eafb16bf"
+ASR_MODELS="https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models"
 KOKORO_BASE="https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
 KOKORO_ONNX_SHA="7d5df8ecf7d4b1878015a32686053fd0eebe2bc377234608764cc0ef3636a6c5"
 KOKORO_VOICES_SHA="bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d"
@@ -88,10 +86,10 @@ node_install() {
 }
 
 models() {
-  if [ -f "$MODELS/$PARAKEET/encoder.int8.onnx" ]; then say "keep Parakeet model"; else
-    fetch "$PARAKEET_URL" "$MODELS/$PARAKEET.tar.bz2" "$PARAKEET_SHA"
-    run tar -xjf "$MODELS/$PARAKEET.tar.bz2" -C "$MODELS"
-    run rm -f "$MODELS/$PARAKEET.tar.bz2"
+  if [ -f "$MODELS/$STT/tokens.txt" ]; then say "keep speech model $STT"; else
+    fetch "$STT_URL" "$MODELS/$STT.tar.bz2" "$STT_SHA"
+    run tar -xjf "$MODELS/$STT.tar.bz2" -C "$MODELS"
+    run rm -f "$MODELS/$STT.tar.bz2"
   fi
   fetch "$KOKORO_BASE/kokoro-v1.0.onnx" "$MODELS/kokoro/kokoro-v1.0.onnx" "$KOKORO_ONNX_SHA"
   fetch "$KOKORO_BASE/voices-v1.0.bin" "$MODELS/kokoro/voices-v1.0.bin" "$KOKORO_VOICES_SHA"
@@ -106,6 +104,22 @@ cfgval() {
     [ -n "$v" ] && break
   done
   printf '%s' "$v"
+}
+
+# stt_choice: the speech model for config's [stt] engine (backend/services.py STT_MODELS has the same names)
+stt_choice() {
+  local engine
+  engine="$(cfgval engine)"
+  case "$engine" in
+    nemotron) STT="sherpa-onnx-nemotron-speech-streaming-en-0.6b-160ms-int8-2026-04-25"
+      STT_SHA="0ae73a41cd51599dc7cac9ac083d9d35de53d762ca45923505fde47a3751814b" ;;
+    nemotron-multilingual) STT="sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-160ms-int8-2026-06-11"
+      STT_SHA="a81909a1780d84cff16d73c15e13e67d9d81d8839faf14870d507d8499f7a61a" ;;
+    parakeet) STT="sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
+      STT_SHA="5793d0fd397c5778d2cf2126994d58e9d56b1be7c04d13c7a15bb1b4eafb16bf" ;;
+    *) echo "config.toml: [stt] engine must be one of nemotron, nemotron-multilingual, parakeet (got '$engine')" >&2; exit 1 ;;
+  esac
+  STT_URL="$ASR_MODELS/$STT.tar.bz2"
 }
 
 append_env() { # append_env <file> <key> <value>
@@ -211,6 +225,7 @@ uninstall() {
 if [ "$UNINSTALL" = 1 ]; then uninstall; exit 0; fi
 
 if [ -z "$NODE_ARCH" ]; then echo "unsupported CPU: $(uname -m) (supported: x86_64, aarch64)" >&2; exit 1; fi
+stt_choice  # an unknown engine stops here, before any package or download step
 distro_install
 node_install
 command -v uv >/dev/null || run sh -c "curl -LsSf https://astral.sh/uv/install.sh | sh"

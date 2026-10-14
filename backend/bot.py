@@ -37,7 +37,7 @@ from pipecat.utils.text.markdown_text_filter import MarkdownTextFilter
 from pipecat.workers.runner import WorkerRunner
 from registry import Registry
 from relay import Relay, make_bridge_tools, start_session
-from services import ParakeetSTTService, build_llm, kokoro_paths, parakeet_dir
+from services import build_llm, kokoro_paths, make_stt
 from shutdown import cancel_on_exit
 from steps import StepHub
 from telegram import Telegram
@@ -112,7 +112,7 @@ async def bot(runner_args: RunnerArguments):
     _quiet_logs()
     transport = await create_transport(runner_args, transport_params)
 
-    stt = ParakeetSTTService(model_dir=parakeet_dir(cfg))
+    stt = make_stt(cfg)
     backend = ClaudeCodeBackend(cmd=os.environ.get("VI_CLAUDE", "claude"), cwd=cfg.backend_cwd,
                                 timeout=cfg.backend_timeout, permission_mode=cfg.permission_mode,
                                 hide_env=(cfg.api_key_env, "TELEGRAM_CHAT_ID"),  # the bot token goes as *_TOKEN

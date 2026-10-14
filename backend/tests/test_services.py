@@ -59,3 +59,27 @@ def test_model_paths_come_from_models_dir():
     cfg = Config(models_dir="/models")
     assert parakeet_dir(cfg) == Path("/models") / PARAKEET_NAME
     assert kokoro_paths(cfg) == (Path("/models/kokoro/kokoro-v1.0.onnx"), Path("/models/kokoro/voices-v1.0.bin"))
+
+
+import pytest
+
+from config import STT_ENGINES
+
+
+def test_every_engine_has_a_model_folder():
+    from services import STT_MODELS
+    assert set(STT_MODELS) == set(STT_ENGINES)
+
+
+def test_a_missing_model_says_to_run_the_installer(tmp_path):
+    from services import make_stt
+    cfg = Config(models_dir=str(tmp_path), stt_engine="nemotron")
+    with pytest.raises(RuntimeError, match=r"nemotron.*not installed.*\./install\.sh"):
+        make_stt(cfg)
+
+
+def test_parakeet_is_built_from_its_folder(tmp_path):
+    from services import STT_MODELS, make_stt
+    (tmp_path / STT_MODELS["parakeet"]).mkdir()
+    stt = make_stt(Config(models_dir=str(tmp_path), stt_engine="parakeet"), recognizer=object())
+    assert isinstance(stt, ParakeetSTTService)

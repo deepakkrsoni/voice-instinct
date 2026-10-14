@@ -10,7 +10,7 @@ Not affiliated with Instinct.
 
 - It lives in the background. Say "Hey Nova" (configurable) and a floating orb appears, listens, thinks
   and speaks, then hides again.
-- You just talk to it. Speech-to-text (Parakeet) and text-to-speech (Kokoro) run locally,
+- You just talk to it. Speech-to-text (Nemotron streaming, or Parakeet) and text-to-speech (Kokoro) run locally,
   around a model of your choice: Gemini by default, or any OpenAI-compatible endpoint or Ollama.
 - It hands errands to your own logged-in `claude` CLI as a tracked background task, runs it
   autonomously in a sandbox, and tells you the result.
@@ -25,7 +25,7 @@ To set it up, see [GETTING_STARTED.md](GETTING_STARTED.md).
 ## How it works
 
 ```
-mic -> Parakeet STT -> Smart Turn v3 -> front LLM -> Kokoro TTS -> speaker
+mic -> Nemotron STT -> Smart Turn v3 -> front LLM -> Kokoro TTS -> speaker
                                           |  ^
                                  delegate(task)  result / questions
                                           v  |

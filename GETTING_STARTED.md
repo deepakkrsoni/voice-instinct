@@ -33,6 +33,13 @@ The commands below live in `~/.local/bin`; use the full path if that folder is n
 In `config.toml`, set `provider = "ollama"` and `model` to a model you have pulled (for example
 `qwen3:8b`). No API key is needed. Then restart both.
 
+## Speech-to-text engine
+
+Speech is transcribed on your machine by NVIDIA's Nemotron streaming model (English) by default. To
+use the 40-language Nemotron or the previous Parakeet engine, set `engine` under `[stt]` in
+`config.toml` to `nemotron-multilingual` or `parakeet`, then re-run `./install.sh` (it downloads only
+the chosen model, about 450 MB) and restart. Nemotron's weights are under the NVIDIA Open Model License.
+
 ## Debug mode: see every browser step
 
 To check what the agent does in the browser, set `browser_steps = true` under `[debug]` in
