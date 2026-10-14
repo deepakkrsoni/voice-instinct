@@ -51,6 +51,18 @@ def test_a_short_pause_between_words_keeps_one_segment():
     assert len(finals) == 1
 
 
+def test_audio_heard_during_the_pause_does_not_trim_the_start_of_the_sentence():
+    # The live mic keeps sending (silent) audio during a pause. Pipecat's base STTService clears
+    # _user_speaking at every VAD stop, and SegmentedSTTService then trims its buffer to 1 s, which
+    # dropped "Hey Nova" from the front of the sentence (found by test_stt_real).
+    silence = [InputAudioRawFrame(audio=b"\x00\x00" * 1600, sample_rate=16000, num_channels=1) for _ in range(6)]
+    segments, _ = run([VADUserStartedSpeakingFrame(), *speech(), VADUserStoppedSpeakingFrame(), *silence,
+                       VADUserStartedSpeakingFrame(), *speech(), VADUserStoppedSpeakingFrame(),
+                       SleepFrame(sleep=0.4)])
+    assert len(segments) == 1
+    assert segments[0] >= 2.05  # 0.5 s speech + 0.6 s pause + 0.5 s speech + 0.5 s padding, nothing trimmed
+
+
 def test_a_real_silence_ends_the_segment_once():
     segments, finals = run([VADUserStartedSpeakingFrame(), *speech(), VADUserStoppedSpeakingFrame(),
                             SleepFrame(sleep=0.4),

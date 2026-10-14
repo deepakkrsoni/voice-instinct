@@ -99,6 +99,9 @@ class ParakeetSTTService(SegmentedSTTService):
 
     async def _handle_user_stopped_speaking(self, frame):
         await self._cancel_cut()
+        # The base STTService already cleared _user_speaking for this VAD stop, which makes
+        # SegmentedSTTService trim the buffer to 1 s while we wait: keep it set until the cut.
+        self._user_speaking = True
         self._cut = self.create_task(self._cut_after_pause(frame))
 
     async def _cut_after_pause(self, frame):
