@@ -9,8 +9,11 @@ WARN_AT = 0.75  # of the errand's timeout
 
 
 class TimeBudget:
-    def __init__(self, clock=time.monotonic):
-        self._clock = clock
+    def __init__(self, clock=time.monotonic, min_notice=0):
+        """min_notice: seconds of warning the agent always gets, whatever the fraction. A PostToolUse hook
+        only fires after a tool ends, and one tool can block for a whole permission question (bot.py
+        passes permission_timeout + 30), so 25% of a short timeout is not always enough."""
+        self._clock, self._min_notice = clock, min_notice
         self._runs = {}  # session id -> [started, timeout, warned]
 
     def start(self, session_id, timeout):
@@ -26,7 +29,7 @@ class TimeBudget:
             return {}
         started, timeout, _ = run
         elapsed = self._clock() - started
-        if elapsed < timeout * WARN_AT:
+        if timeout - elapsed > max(timeout * (1 - WARN_AT), self._min_notice):
             return {}
         run[2] = True
         minutes = max(1, round((timeout - elapsed) / 60))

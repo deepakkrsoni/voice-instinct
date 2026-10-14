@@ -65,7 +65,7 @@ HOOK_TOKEN = load_token(DATA / "hook-token")
 STEPS = StepHub(Path.home(), telegram=Telegram.from_env()) if cfg.debug_browser_steps else None
 # Documented extension point (Running Bots Locally > Adding your own routes): the runner exports
 # its FastAPI app, so hooks share the voice page's process, event loop and port.
-BUDGET = TimeBudget()  # every errand is told when it is nearly out of time (budget.py)
+BUDGET = TimeBudget(min_notice=cfg.permission_timeout + 30)  # errands are told when nearly out of time
 app.include_router(make_router(bridge, HOOK_TOKEN, steps=STEPS, budget=BUDGET))
 app.include_router(make_gui_router(cfg))
 refuse_other_origins(app, port=7860)  # no other web page may open a voice session (guard.py)

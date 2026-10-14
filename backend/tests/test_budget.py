@@ -40,6 +40,28 @@ def test_one_warning_once_three_quarters_of_the_time_is_gone():
     assert b.on_step(step()) == {}  # once: the agent is not nagged at every step
 
 
+def test_the_warning_leaves_room_for_a_permission_wait_and_a_slow_tool():
+    # Opus review of PR #23: with the defaults (300 s, permission questions up to 90 s) a 75% warning
+    # left 75 s, less than one permission wait, so it could land after the deadline.
+    clock = Clock()
+    b = TimeBudget(clock=clock, min_notice=90 + 30)
+    b.start("s1", timeout=300)
+    clock.now = 170  # 130 s left: still enough
+    assert b.on_step(step()) == {}
+    clock.now = 181  # 119 s left: under permission_timeout + 30, though only 60% gone
+    assert "about 2 minutes" in b.on_step(step())["hookSpecificOutput"]["additionalContext"]
+
+
+def test_a_long_errand_still_warns_at_three_quarters():
+    clock = Clock()
+    b = TimeBudget(clock=clock, min_notice=120)
+    b.start("s1", timeout=900)
+    clock.now = 670  # 230 s left: not yet 75% gone
+    assert b.on_step(step()) == {}
+    clock.now = 680  # 220 s left: more than min_notice, but 75% is gone
+    assert b.on_step(step())
+
+
 def test_the_last_minute_is_said_as_one_minute():
     b, clock = make()
     b.start("s1", timeout=100)
