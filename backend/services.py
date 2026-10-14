@@ -1,4 +1,5 @@
-"""Pipecat services: local Parakeet STT (no built-in one exists) and the front-LLM builder."""
+"""Pipecat services: local speech-to-text (Nemotron streaming, or Parakeet; no built-in one exists)
+and the front-LLM builder."""
 
 import asyncio
 import functools
@@ -9,11 +10,12 @@ from pathlib import Path
 import numpy as np
 from loguru import logger
 
-from pipecat.frames.frames import Frame, TranscriptionFrame
+from pipecat.frames.frames import Frame, InterimTranscriptionFrame, TranscriptionFrame, UserStoppedSpeakingFrame
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.google.llm import GoogleLLMService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.settings import STTSettings
-from pipecat.services.stt_service import SegmentedSTTService
+from pipecat.services.stt_service import SegmentedSTTService, STTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 
@@ -40,6 +42,24 @@ def _load_recognizer(model_dir: Path):
         tokens=str(model_dir / "tokens.txt"),
         num_threads=4,
         model_type="nemo_transducer",
+    )
+
+
+@functools.cache  # one copy for every session; each session gets its own stream
+def _load_online_recognizer(model_dir: Path):
+    import sherpa_onnx
+
+    def one(pattern):  # file names differ between builds (encoder.int8.onnx, encoder-….int8.onnx)
+        (path,) = sorted(model_dir.glob(pattern))
+        return str(path)
+
+    return sherpa_onnx.OnlineRecognizer.from_transducer(
+        encoder=one("encoder*.onnx"), decoder=one("decoder*.onnx"), joiner=one("joiner*.onnx"),
+        tokens=str(model_dir / "tokens.txt"), num_threads=4, sample_rate=16000,
+        enable_endpoint_detection=True,
+        rule1_min_trailing_silence=2.4,  # nothing said: reset the stream
+        rule2_min_trailing_silence=0.8,  # the end of a sentence: finalize it
+        rule3_min_utterance_length=20,  # a very long one: finalize anyway
     )
 
 
@@ -81,6 +101,72 @@ class ParakeetSTTService(SegmentedSTTService):
             yield TranscriptionFrame(text, self._user_id, time_now_iso8601())
 
 
+class NemotronSTTService(STTService):
+    """Nemotron Speech Streaming 0.6B via sherpa-onnx: one continuous stream, so the model hears whole
+    sentences. Finals come on sherpa's endpoint (0.8 s of trailing silence) or at the end of the
+    user's turn, never on the VAD's 0.2 s stops: those chopped speech into misheard pieces (#19)."""
+
+    def __init__(self, model_dir: Path | None = None, recognizer=None, language: Language | None = Language.EN,
+                 **kwargs):
+        super().__init__(sample_rate=16000, ttfs_p99_latency=1.2,  # the 0.8 s endpoint plus decoding
+                         settings=STTSettings(model=model_dir.name if model_dir else "nemotron", language=language),
+                         **kwargs)
+        self._rec = recognizer or _load_online_recognizer(model_dir)
+        self._stream = self._rec.create_stream()
+        self._partial = ""
+        # UserStoppedSpeakingFrame is a SystemFrame: it can arrive while a chunk is being decoded in a
+        # thread, so the stream is only touched under this lock.
+        self._lock = asyncio.Lock()
+
+    def can_generate_metrics(self) -> bool:
+        return True
+
+    def _feed(self, pcm: bytes) -> tuple[str, bool]:
+        samples = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
+        self._stream.accept_waveform(16000, samples)
+        while self._rec.is_ready(self._stream):
+            self._rec.decode_stream(self._stream)
+        return self._rec.get_result(self._stream).strip(), self._rec.is_endpoint(self._stream)
+
+    def _final(self) -> TranscriptionFrame | None:
+        text, self._partial = self._partial, ""
+        self._rec.reset(self._stream)
+        if not text:
+            return None
+        frame = TranscriptionFrame(text, self._user_id, time_now_iso8601())
+        frame.finalized = True  # the end-of-turn strategy releases the turn on it
+        return frame
+
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+        out = []
+        async with self._lock:
+            try:
+                text, endpoint = await asyncio.to_thread(self._feed, audio)
+            except Exception as e:  # keep listening: one bad chunk must not end the session
+                self._partial = ""
+                self._rec.reset(self._stream)
+                error = e
+            else:
+                error = None
+                if text and text != self._partial:  # never logged: before the wake phrase it is the room
+                    self._partial = text
+                    out.append(InterimTranscriptionFrame(text, self._user_id, time_now_iso8601()))
+                if endpoint and (final := self._final()):
+                    out.append(final)
+        if error is not None:
+            await self.push_error(f"{self}: transcription failed: {error}", exception=error)
+        for frame in out:  # yielded outside the lock: downstream must never wait on it
+            yield frame
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        if isinstance(frame, UserStoppedSpeakingFrame):
+            async with self._lock:
+                final = self._final()
+            if final:
+                await self.push_frame(final)  # the turn ended: what was heard so far is the sentence
+        await super().process_frame(frame, direction)
+
+
 # The official sherpa-onnx int8 builds; install.sh downloads the configured one (same names there).
 STT_MODELS = {
     "nemotron": "sherpa-onnx-nemotron-speech-streaming-en-0.6b-160ms-int8-2026-04-25",
@@ -100,7 +186,8 @@ def make_stt(cfg, recognizer=None):
         raise RuntimeError(f"The {cfg.stt_engine} speech model is not installed ({d}). Run ./install.sh.")
     if cfg.stt_engine == "parakeet":
         return ParakeetSTTService(model_dir=d, recognizer=recognizer)
-    raise RuntimeError(f"The {cfg.stt_engine} engine is not available yet.")
+    return NemotronSTTService(model_dir=d, recognizer=recognizer,
+                              language=Language.EN if cfg.stt_engine == "nemotron" else None)
 
 
 def build_llm(cfg, system_instruction: str):
