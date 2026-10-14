@@ -6,6 +6,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 POSITIONS = ("bottom-right", "bottom-left", "top-right", "top-left", "center")
+STT_ENGINES = ("nemotron", "nemotron-multilingual", "parakeet")  # services.make_stt; install.sh's table
 
 # config.toml section -> {key in file: Config field}
 _SECTIONS = {
@@ -17,6 +18,7 @@ _SECTIONS = {
     "agent": {"permission_mode": "permission_mode", "backend_timeout": "backend_timeout",
               "permission_timeout": "permission_timeout"},
     "debug": {"browser_steps": "debug_browser_steps"},
+    "stt": {"engine": "stt_engine"},
 }
 
 
@@ -38,11 +40,13 @@ class Config:
     permission_timeout: float = 90
     permission_mode: str = "auto"  # Claude Code mode for delegated runs; the sandbox bounds what auto may do
     debug_browser_steps: bool = False  # screenshot every errand browser step (steps.py)
+    stt_engine: str = "nemotron"  # speech-to-text engine (services.make_stt); install.sh downloads only this one
 
     @property
     def wake_phrases(self) -> list[str]:
         words = " ".join(self.name.lower().split())
-        return [f"hey {words}", f"okay {words}", f"ok {words}"]  # STT writes both "okay" and "OK"
+        # STT writes both "okay" and "OK"; Nemotron writes "Hey" as "Hay"
+        return [f"hey {words}", f"okay {words}", f"ok {words}", f"hay {words}"]
 
 
 def load(path=None) -> Config:
@@ -70,4 +74,6 @@ def load(path=None) -> Config:
         raise ValueError(f"config.toml: [gui] position must be one of {', '.join(POSITIONS)}")
     if not isinstance(cfg.debug_browser_steps, bool):
         raise ValueError("config.toml: [debug] browser_steps must be true or false")
+    if cfg.stt_engine not in STT_ENGINES:
+        raise ValueError(f"config.toml: [stt] engine must be one of {', '.join(STT_ENGINES)}")
     return cfg
