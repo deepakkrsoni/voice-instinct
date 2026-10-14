@@ -11,6 +11,7 @@ from loguru import logger
 import json
 
 from autonomy import browser_mcp, sandbox_settings, with_debug_record
+from budget import TimeBudget
 from claude_cli import ClaudeCodeBackend
 from config import REPO_ROOT, load
 from delegate import make_tools
@@ -64,7 +65,8 @@ HOOK_TOKEN = load_token(DATA / "hook-token")
 STEPS = StepHub(Path.home(), telegram=Telegram.from_env()) if cfg.debug_browser_steps else None
 # Documented extension point (Running Bots Locally > Adding your own routes): the runner exports
 # its FastAPI app, so hooks share the voice page's process, event loop and port.
-app.include_router(make_router(bridge, HOOK_TOKEN, steps=STEPS))
+BUDGET = TimeBudget(min_notice=cfg.permission_timeout + 30)  # errands are told when nearly out of time
+app.include_router(make_router(bridge, HOOK_TOKEN, steps=STEPS, budget=BUDGET))
 app.include_router(make_gui_router(cfg))
 refuse_other_origins(app, port=7860)  # no other web page may open a voice session (guard.py)
 logging.getLogger("uvicorn.access").addFilter(hide_hook_tokens)  # the token is in the URL
@@ -124,11 +126,10 @@ async def bot(runner_args: RunnerArguments):
         settings_for = lambda sid, debug_cwd=None: write_run_settings(
             DATA / "runs", sid, HOOK_TOKEN, HOOK_PORT,
             extra=autonomy if debug_cwd is None else with_debug_record(autonomy, debug_cwd, Path.home()),
-            hook_timeout=int(cfg.permission_timeout) + 10,  # Claude must outwait our own question timeout
-            step_hook=debug_cwd is not None)
+            hook_timeout=int(cfg.permission_timeout) + 10)  # Claude must outwait our own question timeout
         # Tools declare their own options with @tool_options; LLMContext(tools=...) is the registration.
         tools = [*make_tools(backend, registry, settings_for, on_finish=bridge.expire_session,
-                             workspace_root=Path(cfg.workspace_dir).expanduser(), steps=STEPS),
+                             workspace_root=Path(cfg.workspace_dir).expanduser(), steps=STEPS, budget=BUDGET),
                  *make_bridge_tools(bridge, relay, registry, backend)]
     else:
         logger.warning("claude CLI not found; running front-model-only")

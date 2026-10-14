@@ -14,7 +14,8 @@ from relay import quote_data
 from workspace import resolve_workdir
 
 
-def make_tools(backend, registry, settings_for, on_finish=None, workspace_root=None, home=None, steps=None):
+def make_tools(backend, registry, settings_for, on_finish=None, workspace_root=None, home=None, steps=None,
+               budget=None):
     home = Path(home) if home else Path.home()
     workspace_root = Path(workspace_root) if workspace_root else home / ".voice-instinct" / "workspace"
     state = {"session": None, "cwd": None, "running": False}  # ponytail: one task at a time, single user
@@ -61,6 +62,8 @@ def make_tools(backend, registry, settings_for, on_finish=None, workspace_root=N
                  "started; you will be told when it's done."},
                 properties=FunctionCallResultProperties(run_llm=True, is_final=False))
             mcp = settings = res = None
+            if budget:  # the agent is told when it is nearly out of time (budget.py)
+                budget.start(sid, getattr(backend, "timeout", 300))
             try:  # setup too: once "started" is said, the errand must always report back
                 if steps:  # debug mode: a browser of our own and every step recorded (steps.py)
                     mcp = await steps.start(sid, str(wd))
@@ -85,6 +88,8 @@ def make_tools(backend, registry, settings_for, on_finish=None, workspace_root=N
                                            else "error" if res.is_error else "done")
                     except Exception as e:  # e.g. the footer could not be written: still report back
                         logger.error(f"debug record not finished: {e!r}")
+                if budget:
+                    budget.finish(sid)
                 if on_finish:  # a run that ended can no longer use an answer
                     on_finish(sid)
             status = "error" if res.is_error else "done"
