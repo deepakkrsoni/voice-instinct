@@ -99,7 +99,7 @@ def test_dry_run_on_arch_plans_everything_and_changes_nothing(tmp_path):
     assert r.returncode == 0, r.stderr
     out = r.stdout
     assert "pacman -S --needed bubblewrap socat curl tar bzip2 xz" in out and "nodejs" not in out.split("System packages")[1].split("\n")[0]
-    assert "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2" in out and "kokoro-v1.0.onnx" in out
+    assert "sherpa-onnx-nemotron-speech-streaming-en-0.6b-160ms-int8-2026-04-25.tar.bz2" in out and "kokoro-v1.0.onnx" in out
     assert "uv sync --python 3.13" in out and "npm ci" in out  # unpinned, uv picks 3.15 on a clean box: no onnxruntime wheels
     assert "electron/install.js" in out  # npm 12 skips install scripts, so fetch the binary explicitly
     assert "voice-instinct.service" in out and "voice-instinct.desktop" in out
@@ -337,3 +337,36 @@ def test_an_installed_errand_browser_is_kept_on_re_run(tmp_path):
     (home / ".voice-instinct/browser/browsers/chromium-1247").mkdir(parents=True)
     r, _ = run_clean(tmp_path, "--dry-run")
     assert "keep errand browser" in r.stdout and "install chromium" not in r.stdout
+
+
+def run_with_engine(tmp_path, engine):
+    repo = clean_repo(tmp_path)
+    if engine is not None:
+        (repo / "config.toml").write_text(f'[stt]\nengine = "{engine}"\n')
+    rel = tmp_path / "os-release"
+    rel.write_text('ID=arch\nNAME="arch"\n')
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    env = {**os.environ, "VI_OS_RELEASE": str(rel), "VI_HOME": str(home), "VI_PKG_CHECK": "not-installed-tool"}
+    return subprocess.run(["bash", str(repo / "install.sh"), "--dry-run"], capture_output=True, text=True, env=env)
+
+
+NEMOTRON = "sherpa-onnx-nemotron-speech-streaming-en-0.6b-160ms-int8-2026-04-25.tar.bz2"
+MULTI = "sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-160ms-int8-2026-06-11.tar.bz2"
+PARAKEET = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2"
+
+
+@pytest.mark.parametrize("engine,wanted", [(None, NEMOTRON), ("nemotron", NEMOTRON),
+                                           ("nemotron-multilingual", MULTI), ("parakeet", PARAKEET)])
+def test_only_the_chosen_speech_model_is_downloaded(tmp_path, engine, wanted):
+    r = run_with_engine(tmp_path, engine)
+    assert r.returncode == 0, r.stderr
+    assert wanted in r.stdout
+    assert [m for m in (NEMOTRON, MULTI, PARAKEET) if m in r.stdout] == [wanted]
+
+
+def test_an_unknown_speech_engine_stops_before_anything_is_installed(tmp_path):
+    r = run_with_engine(tmp_path, "whisper")
+    assert r.returncode == 1
+    assert "[stt] engine must be one of nemotron, nemotron-multilingual, parakeet" in r.stderr
+    assert "System packages" not in r.stdout and "would run" not in r.stdout
