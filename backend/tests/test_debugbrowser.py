@@ -1,4 +1,6 @@
 import asyncio
+import os
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -43,6 +45,27 @@ def test_a_browser_that_never_starts_is_reported_and_cleaned_up(tmp_path):
     fake.chmod(0o755)
     with pytest.raises(RuntimeError, match="did not start"):
         asyncio.run(launch(fake, timeout=2))
+
+
+def test_a_launch_cancelled_while_the_browser_starts_leaves_nothing_running(tmp_path):
+    pid_file = tmp_path / "pid"
+    slow = tmp_path / "chrome"  # starts but never writes DevToolsActivePort
+    slow.write_text(f"#!/bin/sh\necho $$ > {pid_file}\nexec sleep 30\n")
+    slow.chmod(0o755)
+
+    async def go():
+        t = asyncio.create_task(launch(slow, timeout=20))
+        while not pid_file.exists():
+            await asyncio.sleep(0.02)
+        t.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await t
+
+    before = set(Path(tempfile.gettempdir()).glob("vi-browser-*"))
+    asyncio.run(go())
+    with pytest.raises(ProcessLookupError):
+        os.kill(int(pid_file.read_text()), 0)
+    assert set(Path(tempfile.gettempdir()).glob("vi-browser-*")) <= before  # its profile is gone too
 
 
 REAL = headless_shell(Path.home())

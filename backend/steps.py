@@ -11,6 +11,8 @@ import json
 import time
 from pathlib import Path
 
+from loguru import logger
+
 from autonomy import browser_mcp
 from debugbrowser import headless_shell, launch, page_url, screenshot
 
@@ -43,9 +45,14 @@ class StepRecorder:
         self.report, self.n, self.lines, self.started = self.dir / "steps.md", 0, [], time.monotonic()
         self._append(f"# Browser steps, {time.strftime('%Y-%m-%d %H:%M')}\n")
 
+    # Read-only between our writes: Playwright MCP runs outside the sandbox and can save snapshots and
+    # screenshots under any name in the errand folder, so the Edit deny rule alone cannot protect them.
     def _append(self, line):
+        if self.report.exists():
+            self.report.chmod(0o644)
         with self.report.open("a") as f:
             f.write(line + "\n")
+        self.report.chmod(0o444)
 
     def note(self, text):
         self.lines.append(text)
@@ -56,6 +63,7 @@ class StepRecorder:
         shot = f"{self.n:03d}.png"
         if png:
             (self.dir / shot).write_bytes(png)
+            (self.dir / shot).chmod(0o444)
         tail = f"→ {shot}" if png else f"(no screenshot: {error or 'unknown'})"
         line = f"{self.n}. {time.strftime('%H:%M:%S')} {action(tool_name, tool_input)} {tail}"
         self.lines.append(line)
@@ -83,8 +91,13 @@ class StepHub:
 
     async def start(self, session_id, cwd):
         """Open the run's record and its own browser. Returns the --mcp-config JSON, or None to run the
-        errand with the normal browser (and no capture)."""
-        rec, browser = StepRecorder(cwd), None
+        errand with the normal browser (and no capture). Never raises: debug mode must not fail an errand."""
+        try:
+            rec = StepRecorder(cwd)
+        except OSError as e:
+            logger.warning(f"debug capture off: cannot create the record ({type(e).__name__})")
+            return None
+        browser = None
         exe = headless_shell(self.home)
         if exe is None or browser_mcp(self.home) is None:
             rec.note("Debug capture off: the errand browser is not installed.")

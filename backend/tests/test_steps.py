@@ -2,6 +2,7 @@ import asyncio
 import json
 from types import SimpleNamespace
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -94,6 +95,28 @@ def test_a_resumed_errand_never_overwrites_an_earlier_runs_screenshots(tmp_path)
     second.record("mcp__browser__browser_click", {"element": "B"}, b"other")
     assert first.dir != second.dir and first.dir.parent == second.dir.parent == tmp_path / "debug"
     assert (first.dir / "001.png").read_bytes() == PNG
+
+
+def test_the_agents_browser_cannot_overwrite_the_record(tmp_path):
+    # Playwright MCP runs outside the sandbox and can save snapshots/screenshots under any filename in
+    # the errand folder: the record's files must refuse writes from anyone but the recorder.
+    rec = StepRecorder(tmp_path)
+    rec.record("mcp__browser__browser_click", {"element": "A"}, PNG)
+    for name in ("steps.md", "001.png"):
+        with pytest.raises(PermissionError):
+            (rec.dir / name).write_text("tampered")
+    rec.record("mcp__browser__browser_click", {"element": "B"}, PNG)  # the recorder itself still appends
+    rec.finish("done")
+    assert "browser_click: B" in (rec.dir / "steps.md").read_text()
+    with pytest.raises(PermissionError):
+        (rec.dir / "steps.md").write_text("tampered")
+
+
+def test_a_record_that_cannot_be_created_means_an_ordinary_errand(tmp_path):
+    hub, _ = _hub(tmp_path)
+    (tmp_path / "debug").write_text("a file where the record folder would go")
+    assert asyncio.run(hub.start("s1", tmp_path)) is None
+    assert asyncio.run(hub.on_step(_step())) == {}
 
 
 def test_a_step_is_screenshotted_recorded_and_sent(tmp_path):

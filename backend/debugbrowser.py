@@ -42,20 +42,28 @@ class Browser:
 
 async def launch(exe, timeout=10):
     profile = tempfile.mkdtemp(prefix="vi-browser-")
-    proc = await asyncio.create_subprocess_exec(
-        str(exe), f"--user-data-dir={profile}", "--remote-debugging-port=0", "--no-first-run", "about:blank",
-        stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
-        start_new_session=True)
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            str(exe), f"--user-data-dir={profile}", "--remote-debugging-port=0", "--no-first-run", "about:blank",
+            stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+            start_new_session=True)
+    except BaseException:
+        shutil.rmtree(profile, ignore_errors=True)
+        raise
     browser = Browser(proc, profile)
     port_file = Path(profile) / "DevToolsActivePort"  # Chromium writes its chosen port here
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
-    while loop.time() < deadline and proc.returncode is None:
-        text = port_file.read_text() if port_file.exists() else ""
-        if text.strip():
-            browser.port = int(text.split()[0])
-            return browser
-        await asyncio.sleep(0.05)
+    try:
+        while loop.time() < deadline and proc.returncode is None:
+            text = port_file.read_text() if port_file.exists() else ""
+            if text.strip():
+                browser.port = int(text.split()[0])
+                return browser
+            await asyncio.sleep(0.05)
+    except BaseException:  # cancelled while starting (orb quit): it runs in its own session, never orphan it
+        await asyncio.shield(browser.close())
+        raise
     await browser.close()
     raise RuntimeError("the debug browser did not start")
 

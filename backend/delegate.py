@@ -60,14 +60,13 @@ def make_tools(backend, registry, settings_for, on_finish=None, workspace_root=N
                 {"status": "started", "instruction": "In one short sentence tell the user you've "
                  "started; you will be told when it's done."},
                 properties=FunctionCallResultProperties(run_llm=True, is_final=False))
-            mcp = None
-            if steps:  # debug mode: a browser of our own and every step recorded (steps.py)
-                mcp = await steps.start(sid, str(wd))
-                settings = settings_for(sid, str(wd))
-            else:
-                settings = settings_for(sid)
-            res = None
-            try:
+            mcp = settings = res = None
+            try:  # setup too: once "started" is said, the errand must always report back
+                if steps:  # debug mode: a browser of our own and every step recorded (steps.py)
+                    mcp = await steps.start(sid, str(wd))
+                    settings = settings_for(sid, str(wd))
+                else:
+                    settings = settings_for(sid)
                 res = await backend.run(task, session_id=sid, resume=resume, settings=settings, cwd=str(wd),
                                         mcp_config=mcp)
             except asyncio.CancelledError:  # the session ended (orb quit, backend restart) mid-errand
@@ -81,8 +80,11 @@ def make_tools(backend, registry, settings_for, on_finish=None, workspace_root=N
                 if settings:  # holds the hook token: do not leave it lying around
                     Path(settings).unlink(missing_ok=True)
                 if steps:  # kills the debug browser and ends the record, cancelled or not
-                    await steps.finish(sid, "aborted" if res is None else "stopped" if res.stopped
-                                       else "error" if res.is_error else "done")
+                    try:
+                        await steps.finish(sid, "aborted" if res is None else "stopped" if res.stopped
+                                           else "error" if res.is_error else "done")
+                    except Exception as e:  # e.g. the footer could not be written: still report back
+                        logger.error(f"debug record not finished: {e!r}")
                 if on_finish:  # a run that ended can no longer use an answer
                     on_finish(sid)
             status = "error" if res.is_error else "done"

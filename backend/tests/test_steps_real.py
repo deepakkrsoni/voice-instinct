@@ -17,11 +17,11 @@ pytestmark = pytest.mark.skipif(headless_shell(HOME) is None or browser_mcp(HOME
                                 reason="the errand browser is not installed (install.sh)")
 
 
-async def _mcp(config):
+async def _mcp(config, cwd):
     server = json.loads(config)["mcpServers"]["browser"]
-    proc = await asyncio.create_subprocess_exec(
+    proc = await asyncio.create_subprocess_exec(  # the CLI starts it in the errand folder too
         server["command"], *server["args"], stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.DEVNULL, env={**os.environ, **server["env"]})
+        stderr=asyncio.subprocess.DEVNULL, env={**os.environ, **server["env"]}, cwd=cwd)
     ids = iter(range(1, 100))
 
     async def call(method, params):
@@ -45,7 +45,7 @@ def test_every_step_of_a_real_browser_session_is_captured_from_the_right_tab(tmp
     async def go():
         config = await hub.start("s1", tmp_path)
         assert config is not None
-        proc, call = await _mcp(config)
+        proc, call = await _mcp(config, tmp_path)
         try:
             async def step(tool, args):
                 result = await call("tools/call", {"name": tool, "arguments": args})
@@ -57,11 +57,18 @@ def test_every_step_of_a_real_browser_session_is_captured_from_the_right_tab(tmp
             await step("browser_navigate", {"url": "data:text/html,<h1>two</h1>"})
             await call("tools/call", {"name": "browser_tabs", "arguments": {"action": "select", "index": 0}})
             await step("browser_navigate", {"url": "data:text/html,<h1>three</h1>"})
+            # The agent's browser tools write files outside the sandbox: they must not replace the record.
+            run_dir = hub._runs["s1"].rec.dir.relative_to(tmp_path)
+            before = (tmp_path / run_dir / "steps.md").read_text()
+            await call("tools/call", {"name": "browser_snapshot", "arguments": {"filename": f"{run_dir}/steps.md"}})
+            await call("tools/call", {"name": "browser_take_screenshot",
+                                      "arguments": {"filename": f"{run_dir}/001.png", "type": "png"}})
+            assert (tmp_path / run_dir / "steps.md").read_text() == before
+            rec = hub._runs["s1"].rec
         finally:
             proc.kill()
             await proc.wait()
-        rec = hub._runs["s1"].rec
-        await hub.finish("s1", "done")
+            await hub.finish("s1", "done")  # a failed assertion must not leave Chromium running
         return rec
 
     rec = asyncio.run(go())

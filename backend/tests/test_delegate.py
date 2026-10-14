@@ -295,6 +295,25 @@ def test_a_cancelled_debug_errand_kills_its_browser_and_ends_the_record_aborted(
     assert steps.calls[-1][0] == "finish" and steps.calls[-1][2] == "aborted"
 
 
+def test_a_debug_setup_failure_still_ends_the_errand_and_closes_its_browser():
+    class Boom(FakeSteps):
+        async def finish(self, sid, outcome):
+            super_finish = FakeSteps.finish(self, sid, outcome)
+            await super_finish
+            raise OSError("disk full")
+
+    reg, steps = Registry(), Boom()
+
+    def settings_for(sid, debug_cwd=None):
+        raise OSError("cannot write settings")
+
+    (delegate,) = make_tools(FakeBackend([]), reg, settings_for, steps=steps)
+    p, out = make_params()
+    run(delegate(p, "find flights"))
+    assert out[-1]["status"] == "error"  # the user is told; nothing hangs
+    assert steps.calls[-1][0] == "finish"  # the browser started by start() is closed
+
+
 def test_a_normal_errand_keeps_the_backends_own_browser():
     reg, b, delegate = setup([BackendResult("ok", "x")])
     run(delegate(make_params()[0], "find flights"))
