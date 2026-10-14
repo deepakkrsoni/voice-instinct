@@ -68,6 +68,23 @@ def test_a_launch_cancelled_while_the_browser_starts_leaves_nothing_running(tmp_
     assert set(Path(tempfile.gettempdir()).glob("vi-browser-*")) <= before  # its profile is gone too
 
 
+def test_the_debug_browser_is_hardened_like_playwrights_and_gets_no_secrets(tmp_path, monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "front-model-key")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "bot-token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "42")
+    seen = tmp_path / "seen"
+    fake = tmp_path / "chrome"  # records how it was started, then exits
+    fake.write_text(f'#!/bin/sh\necho "$@" > {seen}.args\nenv > {seen}.env\nexit 1\n')
+    fake.chmod(0o755)
+    with pytest.raises(RuntimeError):
+        asyncio.run(launch(fake, timeout=2))
+    args, env = Path(f"{seen}.args").read_text(), Path(f"{seen}.env").read_text()
+    for flag in ("--password-store=basic", "--use-mock-keychain", "--disable-background-networking",
+                 "--disable-component-update", "--disable-extensions", "--disable-sync"):
+        assert flag in args, flag  # never the user's keyring, no background traffic
+    assert "front-model-key" not in env and "bot-token" not in env and "TELEGRAM_CHAT_ID" not in env
+
+
 REAL = headless_shell(Path.home())
 
 

@@ -74,6 +74,11 @@ def test_typed_text_and_form_values_never_reach_the_record():
     assert action("mcp__browser__browser_navigate_back", {}) == "browser_navigate_back"
 
 
+def test_a_password_typed_key_by_key_is_not_recorded_but_named_keys_are():
+    assert action("mcp__browser__browser_press_key", {"key": "h"}) == "browser_press_key"
+    assert action("mcp__browser__browser_press_key", {"key": "Enter"}) == "browser_press_key: Enter"
+
+
 def test_each_step_is_written_as_it_happens(tmp_path):
     rec = StepRecorder(tmp_path)
     line = rec.record("mcp__browser__browser_click", {"element": "Search"}, PNG)

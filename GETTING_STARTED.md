@@ -39,7 +39,7 @@ To check what the agent does in the browser, set `browser_steps = true` under `[
 `config.toml` and restart (`systemctl --user restart voice-instinct`). Every page-changing step of
 an errand (open a page, click, type, submit) is then screenshotted into the errand's folder, under
 `debug/`, with `steps.md` listing each step and how the errand ended. What the agent typed is never
-written down.
+written down, but the address of every page it opens is, including any codes in a link it follows.
 
 To also get each screenshot in Telegram, create a bot with @BotFather, send it a message, and put
 its token and your chat id in `.env`:

@@ -15,6 +15,14 @@ from pathlib import Path
 
 import aiohttp
 
+from claude_cli import _agent_env
+
+# A subset of Playwright's own chromiumSwitches, so this browser is no weaker than the normal errand one:
+# never the user's keyring, no background or update traffic, no extensions or sync.
+_SWITCHES = ("--no-first-run", "--password-store=basic", "--use-mock-keychain", "--disable-background-networking",
+             "--disable-component-update", "--disable-default-apps", "--disable-extensions",
+             "--no-default-browser-check", "--disable-sync", "--disable-breakpad", "--metrics-recording-only")
+
 
 def headless_shell(home):
     """The installer's headless Chromium, or None."""
@@ -44,8 +52,9 @@ async def launch(exe, timeout=10):
     profile = tempfile.mkdtemp(prefix="vi-browser-")
     try:
         proc = await asyncio.create_subprocess_exec(
-            str(exe), f"--user-data-dir={profile}", "--remote-debugging-port=0", "--no-first-run", "about:blank",
+            str(exe), f"--user-data-dir={profile}", "--remote-debugging-port=0", *_SWITCHES, "about:blank",
             stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+            env=_agent_env(("TELEGRAM_CHAT_ID",)),  # ponytail: a front-model key not named *_API_KEY still passes
             start_new_session=True)
     except BaseException:
         shutil.rmtree(profile, ignore_errors=True)

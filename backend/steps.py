@@ -24,7 +24,8 @@ _FIELDS = ("element", "url", "key", "startElement", "endElement")
 def action(tool_name, tool_input):
     """One line for a step: the tool and what it acted on."""
     inp = tool_input if isinstance(tool_input, dict) else {}
-    parts = [str(inp[k]) for k in _FIELDS if inp.get(k)]
+    # A single key may be part of a password typed key by key; named keys (Enter, Tab) are kept.
+    parts = [str(inp[k]) for k in _FIELDS if inp.get(k) and not (k == "key" and len(str(inp[k])) == 1)]
     if isinstance(inp.get("fields"), list):  # fill_form: the field names only
         parts += [str(f["name"]) for f in inp["fields"] if isinstance(f, dict) and f.get("name")]
     name = str(tool_name).removeprefix("mcp__browser__")
