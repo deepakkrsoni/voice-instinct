@@ -23,7 +23,7 @@ from pipecat.frames.frames import TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.frameworks.rtvi.observer import RTVIObserverParams
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
-from pipecat.processors.aggregators.llm_context import LLMContext
+from conversation import ASSISTANT_PARAMS, make_context, save as save_conversation
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
@@ -84,7 +84,9 @@ SYSTEM_PROMPT = (
     "like 'on it' first. Never buy, pay, book, cancel, or change an account without the user's "
     "explicit go-ahead in this conversation, after saying what it is and how much it costs. "
     "If a delegate result is a question from the agent, such as a choice, ask the "
-    "user and call delegate again with their reply. When you are told a session needs a decision, "
+    "user and call delegate again with their reply and that result's errand id. For any follow-up "
+    "about an earlier errand (check again, refine it, what about those), call delegate with its "
+    "errand id; for a new topic leave errand out. When you are told a session needs a decision, "
     "ask the user, then call answer_question after they answer. Use list_sessions to answer what "
     "you are working on and stop_session to stop one. Never claim a task is done unless a tool "
     "result says done."
@@ -127,7 +129,7 @@ async def bot(runner_args: RunnerArguments):
             DATA / "runs", sid, HOOK_TOKEN, HOOK_PORT,
             extra=autonomy if debug_cwd is None else with_debug_record(autonomy, debug_cwd, Path.home()),
             hook_timeout=int(cfg.permission_timeout) + 10)  # Claude must outwait our own question timeout
-        # Tools declare their own options with @tool_options; LLMContext(tools=...) is the registration.
+        # Tools declare their own options with @tool_options; the context's tools (make_context) are the registration.
         tools = [*make_tools(backend, registry, settings_for, on_finish=bridge.expire_session,
                              workspace_root=Path(cfg.workspace_dir).expanduser(), steps=STEPS, budget=BUDGET),
                  *make_bridge_tools(bridge, relay, registry, backend)]
@@ -151,7 +153,7 @@ async def bot(runner_args: RunnerArguments):
 
     wake = make_wake(cfg.wake_phrases, cfg.awake_timeout, send_gui, hold=lambda: relay.asking)
 
-    context = LLMContext(tools=tools)
+    context = make_context(registry, tools)  # the one ongoing conversation, from where it left off (#24)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         # Defaults: Smart Turn v3 stop strategy (Speech Input & Turn Detection > Best Practices).
@@ -160,6 +162,7 @@ async def bot(runner_args: RunnerArguments):
             # Documented: a wake phrase gates every turn; the defaults follow it.
             user_turn_strategies=UserTurnStrategies(start=[wake, *default_user_turn_start_strategies()]),
         ),
+        assistant_params=ASSISTANT_PARAMS,  # older turns are summarized, so it stays bounded
     )
 
     pipeline = Pipeline(
@@ -198,6 +201,7 @@ async def bot(runner_args: RunnerArguments):
     async def on_assistant_turn_stopped(aggregator, *args):
         relay.bot_turn(False)
         wake.keep_awake()  # the user can reply without the phrase
+        save_conversation(registry, context)
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
@@ -220,6 +224,7 @@ async def bot(runner_args: RunnerArguments):
 
     @worker.event_handler("on_pipeline_finished")
     async def on_pipeline_finished(worker, frame):
+        save_conversation(registry, context)
         relay.detach(worker)  # graceful and cancelled alike; never a newer session's relay
 
     sessions.add(runner)
