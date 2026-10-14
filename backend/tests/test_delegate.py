@@ -59,12 +59,22 @@ def test_delegate_acknowledges_then_reports_and_records_everything():
     assert reg.list_sessions()[0]["last_task"] == "biggest file?"
 
 
-def test_follow_up_resumes_the_same_session():
+def test_a_follow_up_with_the_errand_id_resumes_that_session():
     reg, b, delegate = setup([BackendResult("Which folder?"), BackendResult("done")])
-    run(delegate(make_params()[0], "tidy up"))
-    run(delegate(make_params()[0], "the downloads one"))
+    p, out = make_params()
+    run(delegate(p, "tidy up"))
+    errand = out[-1]["errand"]
+    run(delegate(make_params()[0], "the downloads one", errand=errand))
     assert b.calls[1]["sid"] == b.calls[0]["sid"] and b.calls[1]["resume"] is True
+    assert b.calls[1]["cwd"] == b.calls[0]["cwd"]
     assert len(reg.list_sessions()) == 1
+
+
+def test_without_an_errand_id_it_is_a_new_errand():
+    reg, b, delegate = setup([BackendResult("a"), BackendResult("b")])
+    run(delegate(make_params()[0], "find t-shirts"))
+    run(delegate(make_params()[0], "what's the weather in Bengaluru"))
+    assert b.calls[1]["resume"] is False and b.calls[1]["sid"] != b.calls[0]["sid"]
 
 
 class GatedBackend:
@@ -143,13 +153,12 @@ def test_no_directory_uses_a_private_default_workspace_and_records_it(tmp_path):
 
 
 def test_named_directory_is_used_and_follow_ups_stay_in_it(tmp_path):
-    reg, b, delegate = with_dirs(tmp_path, [BackendResult("a"), BackendResult("b"), BackendResult("c")])
-    run(delegate(make_params()[0], "make it", "~/code/snake"))
-    run(delegate(make_params()[0], "add scores"))  # no directory: same session, same folder
-    run(delegate(make_params()[0], "again", "~/code/snake"))  # same folder named again: still resumes
+    reg, b, delegate = with_dirs(tmp_path, [BackendResult("a"), BackendResult("b")])
+    p, out = make_params()
+    run(delegate(p, "make it", "~/code/snake"))
+    run(delegate(make_params()[0], "add scores", errand=out[-1]["errand"]))  # the follow-up names the errand
     assert {c["cwd"] for c in b.calls} == {str((tmp_path / "code" / "snake").resolve())}
-    assert [c["resume"] for c in b.calls] == [False, True, True]
-    assert len({c["sid"] for c in b.calls}) == 1
+    assert [c["resume"] for c in b.calls] == [False, True] and len({c["sid"] for c in b.calls}) == 1
 
 
 def test_a_different_directory_starts_a_new_session(tmp_path):
@@ -350,3 +359,57 @@ def test_a_cancelled_errand_still_closes_its_budget():
     with pytest.raises(asyncio.CancelledError):
         run(delegate(make_params()[0], "find t-shirts"))
     assert [c[0] for c in budget.calls] == ["start", "finish"]
+
+
+def test_an_old_errand_resumes_even_after_other_errands_and_a_restart(tmp_path):
+    db = tmp_path / "harness.db"
+    b = FakeBackend([BackendResult("tees"), BackendResult("weather"), BackendResult("best is Levi's")])
+    (delegate,) = make_tools(b, Registry(db), lambda sid: None)
+    p, out = make_params()
+    run(delegate(p, "find t-shirts"))
+    tees = out[-1]["errand"]
+    run(delegate(make_params()[0], "weather"))
+    (delegate,) = make_tools(b, Registry(db), lambda sid: None)  # backend restarted: fresh tools, same db
+    p, out = make_params()
+    run(delegate(p, "which had the best rating?", errand=tees))
+    assert b.calls[2]["sid"] == b.calls[0]["sid"] and b.calls[2]["resume"] is True
+    assert out[-1]["errand"] != tees and out[-1]["status"] == "done"
+
+
+def test_every_result_says_which_errand_it_is():
+    reg, b, delegate = setup([BackendResult("ok")])
+    p, out = make_params()
+    run(delegate(p, "find t-shirts"))
+    started, done = out
+    assert started["errand"] == done["errand"]
+    assert reg.get_task(started["errand"])["request"] == "find t-shirts"
+
+
+def test_an_unknown_errand_is_refused_without_starting_anything():
+    reg, b, delegate = setup([])
+    p, out = make_params()
+    run(delegate(p, "check again", errand=999))
+    assert out == [{"status": "error", "errand": 999, "result": "No such errand."}] and b.calls == []
+
+
+def test_a_stopped_errand_is_never_resumed():
+    reg, b, delegate = setup([BackendResult("first")])
+    p, out = make_params()
+    run(delegate(p, "book a table"))
+    errand = out[-1]["errand"]
+    reg.set_state(b.calls[0]["sid"], "ended", end_reason="stopped_by_user")  # what stop_session records
+    p, out = make_params()
+    run(delegate(p, "go on", errand=errand))
+    assert out[-1]["status"] == "error" and "stopped" in out[-1]["result"] and len(b.calls) == 1
+
+
+def test_an_errand_whose_session_is_gone_says_so_plainly():
+    from delegate import GONE
+    gone = BackendResult("The Claude CLI failed: No conversation found with session ID: abc", is_error=True)
+    reg, b, delegate = setup([BackendResult("tees"), gone])
+    p, out = make_params()
+    run(delegate(p, "find t-shirts"))
+    errand = out[-1]["errand"]
+    p, out = make_params()
+    run(delegate(p, "check again", errand=errand))
+    assert out[-1]["status"] == "error" and GONE in out[-1]["result"]
