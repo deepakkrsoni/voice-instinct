@@ -114,6 +114,27 @@ class ParakeetSTTService(SegmentedSTTService):
             await self.cancel_task(self._cut)
             self._cut = None
 
+    # A TV with gaps under PAUSE_SECS would make one ever-growing segment (4 min: 3.7 GB, and no wake
+    # until it ended), so a segment is cut at this length whatever, like Nemotron's rule 3.
+    MAX_SEGMENT_SECS = 20
+
+    async def process_audio_frame(self, frame, direction):
+        await super().process_audio_frame(frame, direction)
+        if self._user_speaking and len(self._audio_buffer) >= self.MAX_SEGMENT_SECS * self.sample_rate * 2:
+            pausing = self._cut is not None
+            await self._cancel_cut()
+            await SegmentedSTTService._handle_user_stopped_speaking(self, frame)  # it never reads the frame
+            self._user_speaking = not pausing  # still talking: keep collecting the next segment
+
+    async def push_frame(self, frame, direction=FrameDirection.DOWNSTREAM):
+        # SegmentedSTTService marks every transcript finalized, which lets Smart Turn end the turn at the
+        # next short stop. If the user started talking again while it was decoded, it is not the end of
+        # their turn, so it goes out unfinalized (split "Hey Nova. Remind me…" / "…to call mom.").
+        if isinstance(frame, TranscriptionFrame) and self._user_speaking:
+            await STTService.push_frame(self, frame, direction)
+            return
+        await super().push_frame(frame, direction)
+
     async def cancel(self, frame):
         await self._cancel_cut()
         await super().cancel(frame)
@@ -144,7 +165,10 @@ class NemotronSTTService(STTService):
 
     def __init__(self, model_dir: Path | None = None, recognizer=None, language: Language | None = Language.EN,
                  **kwargs):
-        super().__init__(sample_rate=16000, ttfs_p99_latency=1.2,  # the 0.8 s endpoint plus decoding
+        # Smart Turn waits this long for a final after the VAD stop. Measured: sherpa's endpoint fires
+        # 0.74-1.34 s after speech ends, so 1.2 split "Hey Nova … <request>" into two turns. A final
+        # is marked finalized and ends the turn at once, so the normal path never waits this out.
+        super().__init__(sample_rate=16000, ttfs_p99_latency=1.8,
                          settings=STTSettings(model=model_dir.name if model_dir else "nemotron", language=language),
                          **kwargs)
         self._rec = recognizer or _load_online_recognizer(model_dir)

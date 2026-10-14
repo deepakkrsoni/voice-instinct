@@ -78,3 +78,36 @@ def test_a_session_ending_mid_pause_pushes_nothing_after_the_end():
 
 def test_the_default_pause_is_long_enough_for_speech():
     assert ParakeetSTTService.PAUSE_SECS == 0.8
+
+
+class SlowOffline(FakeOffline):
+    def decode_stream(self, s):
+        import time
+        time.sleep(0.3)  # runs in a thread, like Parakeet: long enough for the user to resume meanwhile
+
+
+def test_a_transcript_that_arrives_after_the_user_resumed_does_not_end_the_turn():
+    # Opus review of #19: marked finalized, it let Smart Turn end the turn at the next short stop,
+    # splitting "Hey Nova. Remind me…" from "…to call mom."
+    stt = ParakeetSTTService(recognizer=SlowOffline())
+    stt.PAUSE_SECS = 0.1
+    frames = [VADUserStartedSpeakingFrame(), *speech(), VADUserStoppedSpeakingFrame(),
+              SleepFrame(sleep=0.15),  # the pause has passed: decoding starts and takes 0.3 s
+              VADUserStartedSpeakingFrame(), *speech(),  # …and the user is talking again when it lands
+              SleepFrame(sleep=0.4), VADUserStoppedSpeakingFrame(), SleepFrame(sleep=0.6)]
+    down, _ = asyncio.run(run_test(stt, frames_to_send=frames))
+    finals = [f for f in down if isinstance(f, TranscriptionFrame)]
+    assert [f.finalized for f in finals] == [False, True]
+
+
+def test_a_segment_is_cut_once_it_reaches_the_cap_even_without_a_pause():
+    # Opus review of #19: a TV with gaps under the pause made one ever-growing segment (4 min: 3.7 GB).
+    rec = FakeOffline()
+    stt = ParakeetSTTService(recognizer=rec)
+    stt.MAX_SEGMENT_SECS = 1.0
+    asyncio.run(run_test(stt, frames_to_send=[VADUserStartedSpeakingFrame(), *speech(25), SleepFrame(sleep=0.3)]))
+    assert len(rec.segments) >= 2 and max(rec.segments) <= 1.6  # 1 s of audio plus 0.5 s of padding
+
+
+def test_the_default_cap_matches_nemotrons_longest_utterance():
+    assert ParakeetSTTService.MAX_SEGMENT_SECS == 20
