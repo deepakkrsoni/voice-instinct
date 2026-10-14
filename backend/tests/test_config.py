@@ -103,3 +103,17 @@ def test_an_unknown_provider_fails_fast(tmp_path):
 
 def test_ok_spelled_the_way_speech_to_text_writes_it_also_wakes_it():
     assert "ok nova" in Config().wake_phrases
+
+
+def test_debug_browser_steps_is_off_by_default_and_read_from_its_section(tmp_path):
+    assert load(tmp_path / "missing.toml").debug_browser_steps is False
+    p = tmp_path / "c.toml"
+    p.write_text("[debug]\nbrowser_steps = true\n")
+    assert load(p).debug_browser_steps is True
+
+
+def test_debug_browser_steps_must_be_true_or_false(tmp_path):
+    p = tmp_path / "c.toml"
+    p.write_text('[debug]\nbrowser_steps = "yes"\n')
+    with pytest.raises(ValueError, match=r"\[debug\] browser_steps"):
+        load(p)

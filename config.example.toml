@@ -23,3 +23,8 @@ workspace_dir = "~/.voice-instinct/workspace"
 permission_mode = "auto"      # Claude Code permission mode inside the sandbox
 backend_timeout = 300
 permission_timeout = 90
+
+[debug]
+# Screenshot every browser step of an errand into its folder (debug/) and, if TELEGRAM_BOT_TOKEN and
+# TELEGRAM_CHAT_ID are in .env, send each one to your own Telegram chat.
+browser_steps = false

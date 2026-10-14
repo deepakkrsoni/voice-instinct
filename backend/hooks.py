@@ -12,6 +12,9 @@ from fastapi import APIRouter, HTTPException, Request
 from loguru import logger
 
 _EVENTS = ("PermissionRequest", "Stop", "SessionEnd", "SessionStart")
+# Debug mode's step hook (steps.py): the errand browser's tools that change the page.
+STEP_MATCHER = ("mcp__browser__browser_(navigate|navigate_back|click|type|fill_form|select_option"
+                "|press_key|hover|drag|drop)")
 
 
 def hook_response(decision):
@@ -96,7 +99,7 @@ class HookBridge:
         return {}
 
 
-def make_router(bridge, token):
+def make_router(bridge, token, steps=None):
     router = APIRouter()
 
     @router.post("/hook/{tok}/{event}")
@@ -108,6 +111,8 @@ def make_router(bridge, token):
         except Exception:
             return {}
         try:
+            if event == "PostToolUse":  # debug mode's browser steps (steps.py)
+                return await steps.on_step(payload) if steps else {}
             if event == "PermissionRequest" and payload.get("session_id"):
                 return await bridge.on_permission_request(payload)
             return await bridge.on_event(event, payload)
@@ -142,11 +147,14 @@ def load_token(path):
     return tok
 
 
-def write_run_settings(directory, session_id, token, port, hook_timeout=100, extra=None):
+def write_run_settings(directory, session_id, token, port, hook_timeout=100, extra=None, step_hook=False):
     d = Path(directory)
     d.mkdir(parents=True, exist_ok=True)
-    hooks = {e: [{"hooks": [{"type": "http", "timeout": hook_timeout,
-                             "url": f"http://127.0.0.1:{port}/hook/{token}/{e}"}]}] for e in _EVENTS}
+    url = f"http://127.0.0.1:{port}/hook/{token}"
+    hooks = {e: [{"hooks": [{"type": "http", "timeout": hook_timeout, "url": f"{url}/{e}"}]}] for e in _EVENTS}
+    if step_hook:  # 15 s: the screenshot is capped at 10 (steps.SHOT_TIMEOUT)
+        hooks["PostToolUse"] = [{"matcher": STEP_MATCHER,
+                                 "hooks": [{"type": "http", "timeout": 15, "url": f"{url}/PostToolUse"}]}]
     path = d / f"{session_id}.json"
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)  # the URL holds the token
     with os.fdopen(fd, "w") as f:

@@ -18,8 +18,10 @@ class FakeBackend:
     def __init__(self, results):
         self.results, self.calls = list(results), []
 
-    async def run(self, task, session_id=None, resume=False, settings=None, extra_allowed=(), cwd=None):
-        self.calls.append({"task": task, "sid": session_id, "resume": resume, "settings": settings, "cwd": cwd})
+    async def run(self, task, session_id=None, resume=False, settings=None, extra_allowed=(), cwd=None,
+                  mcp_config=None):
+        self.calls.append({"task": task, "sid": session_id, "resume": resume, "settings": settings, "cwd": cwd,
+                           "mcp_config": mcp_config})
         return self.results.pop(0)
 
 
@@ -69,7 +71,8 @@ class GatedBackend:
     def __init__(self, gate):
         self.gate, self.calls = gate, []
 
-    async def run(self, task, session_id=None, resume=False, settings=None, extra_allowed=(), cwd=None):
+    async def run(self, task, session_id=None, resume=False, settings=None, extra_allowed=(), cwd=None,
+                  mcp_config=None):
         self.calls.append(task)
         await self.gate.wait()
         return BackendResult("done it")
@@ -247,3 +250,71 @@ def test_the_result_is_spoken_as_a_short_summary_not_read_out():
     run(delegate(p, "flights"))
     note = out[-1]["note"]
     assert "two short sentences" in note and "offer" in note and "table" in note
+
+
+class FakeSteps:
+    def __init__(self, mcp='{"cdp": 1}'):
+        self.mcp, self.calls = mcp, []
+
+    async def start(self, sid, cwd):
+        self.calls.append(("start", sid, cwd))
+        return self.mcp
+
+    async def finish(self, sid, outcome):
+        self.calls.append(("finish", sid, outcome))
+
+
+def _debug_setup(backend):
+    reg, steps, seen = Registry(), FakeSteps(), []
+
+    def settings_for(sid, debug_cwd=None):
+        seen.append(debug_cwd)
+        return f"/settings/{sid}.json"
+
+    (delegate,) = make_tools(backend, reg, settings_for, steps=steps)
+    return delegate, steps, seen
+
+
+def test_a_debug_errand_gets_its_own_browser_and_its_record_is_finished():
+    b = FakeBackend([BackendResult("ok", "x")])
+    delegate, steps, seen = _debug_setup(b)
+    run(delegate(make_params()[0], "find flights"))
+    call = b.calls[0]
+    assert call["mcp_config"] == '{"cdp": 1}' and seen == [call["cwd"]]
+    assert steps.calls == [("start", call["sid"], call["cwd"]), ("finish", call["sid"], "done")]
+
+
+def test_a_cancelled_debug_errand_kills_its_browser_and_ends_the_record_aborted():
+    class Cancelled(FakeBackend):
+        async def run(self, task, **kw):
+            raise asyncio.CancelledError
+
+    delegate, steps, _ = _debug_setup(Cancelled([]))
+    with pytest.raises(asyncio.CancelledError):
+        run(delegate(make_params()[0], "find flights"))
+    assert steps.calls[-1][0] == "finish" and steps.calls[-1][2] == "aborted"
+
+
+def test_a_debug_setup_failure_still_ends_the_errand_and_closes_its_browser():
+    class Boom(FakeSteps):
+        async def finish(self, sid, outcome):
+            super_finish = FakeSteps.finish(self, sid, outcome)
+            await super_finish
+            raise OSError("disk full")
+
+    reg, steps = Registry(), Boom()
+
+    def settings_for(sid, debug_cwd=None):
+        raise OSError("cannot write settings")
+
+    (delegate,) = make_tools(FakeBackend([]), reg, settings_for, steps=steps)
+    p, out = make_params()
+    run(delegate(p, "find flights"))
+    assert out[-1]["status"] == "error"  # the user is told; nothing hangs
+    assert steps.calls[-1][0] == "finish"  # the browser started by start() is closed
+
+
+def test_a_normal_errand_keeps_the_backends_own_browser():
+    reg, b, delegate = setup([BackendResult("ok", "x")])
+    run(delegate(make_params()[0], "find flights"))
+    assert b.calls[0]["mcp_config"] is None

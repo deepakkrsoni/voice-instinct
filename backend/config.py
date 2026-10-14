@@ -16,6 +16,7 @@ _SECTIONS = {
               "backend_cwd": "backend_cwd"},
     "agent": {"permission_mode": "permission_mode", "backend_timeout": "backend_timeout",
               "permission_timeout": "permission_timeout"},
+    "debug": {"browser_steps": "debug_browser_steps"},
 }
 
 
@@ -36,6 +37,7 @@ class Config:
     workspace_dir: str = "~/.voice-instinct/workspace"  # default folder for tasks that name none
     permission_timeout: float = 90
     permission_mode: str = "auto"  # Claude Code mode for delegated runs; the sandbox bounds what auto may do
+    debug_browser_steps: bool = False  # screenshot every errand browser step (steps.py)
 
     @property
     def wake_phrases(self) -> list[str]:
@@ -66,4 +68,6 @@ def load(path=None) -> Config:
         raise ValueError("config.toml: [agent] permission_timeout must be above 0 and below backend_timeout")
     if cfg.gui_position not in POSITIONS:
         raise ValueError(f"config.toml: [gui] position must be one of {', '.join(POSITIONS)}")
+    if not isinstance(cfg.debug_browser_steps, bool):
+        raise ValueError("config.toml: [debug] browser_steps must be true or false")
     return cfg

@@ -66,18 +66,28 @@ def sandbox_settings(home, app_dir, data_dir, hook_port=7860) -> dict:
     }
 
 
-def browser_mcp(home):
+def browser_mcp(home, cdp_endpoint=None):
     """The errand browser for --mcp-config, or None until install.sh has set it up.
 
     Playwright MCP on the installer's own Node and its own Chromium, headless, with a fresh profile
     each run (--isolated): never signed in to the user's accounts. Page snapshots it saves stay in
-    the errand's own folder.
+    the errand's own folder. In debug mode (steps.py) it attaches to a browser we launched instead,
+    so every step can be screenshotted.
     """
     vi = Path(home) / ".voice-instinct"
     node, cli = vi / "node/bin/node", vi / "browser/node_modules/@playwright/mcp/cli.js"
     browsers = vi / "browser/browsers"
     if not (node.exists() and cli.exists() and browsers.is_dir()):
         return None
-    return {"mcpServers": {"browser": {"type": "stdio", "command": str(node),
-                                       "args": [str(cli), "--browser", "chromium", "--headless", "--isolated"],
+    args = (["--cdp-endpoint", cdp_endpoint] if cdp_endpoint
+            else ["--browser", "chromium", "--headless", "--isolated"])
+    return {"mcpServers": {"browser": {"type": "stdio", "command": str(node), "args": [str(cli), *args],
                                        "env": {"PLAYWRIGHT_BROWSERS_PATH": str(browsers)}}}}
+
+
+def with_debug_record(settings, cwd, home):
+    """Debug runs: the step record in <cwd>/debug is the user's, not the agent's to change. Claude Code
+    merges Edit deny rules into the sandbox's denyWrite, so this holds for Bash too."""
+    rule = f"Edit({_rule(Path(cwd) / 'debug', Path(home))}/**)"
+    return {**settings, "permissions": {**settings["permissions"],
+                                        "deny": [*settings["permissions"]["deny"], rule]}}

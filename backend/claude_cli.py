@@ -87,6 +87,7 @@ class ClaudeCodeBackend:
         settings: str | None = None,
         extra_allowed: Iterable[str] = (),
         cwd: str | None = None,
+        mcp_config: str | None = None,
     ) -> BackendResult:
         if not self.available():
             return BackendResult(text="The Claude CLI is not installed.", is_error=True)
@@ -95,8 +96,9 @@ class ClaudeCodeBackend:
                 "--allowedTools", tools,
                 "--strict-mcp-config",  # none of the user's own MCP servers (their browsers, Slack, mail)
                 "--setting-sources", "project"]  # nor their ~/.claude settings, plugins or hooks
-        if self.mcp_config:
-            args += ["--mcp-config", self.mcp_config]
+        mcp = mcp_config or self.mcp_config  # a debug run brings its own browser (steps.py)
+        if mcp:
+            args += ["--mcp-config", mcp]
         if session_id:
             args += ["--resume" if resume else "--session-id", session_id]
         if settings:
