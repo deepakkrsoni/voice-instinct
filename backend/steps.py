@@ -24,9 +24,19 @@ SCREENSHOT_TOOLS = re.compile("mcp__browser__browser_(navigate|navigate_back|cli
 # Never typed text or form values: they may be passwords.
 _FIELDS = ("element", "url", "key", "startElement", "endElement")
 # Other tools: the one field that says what the step was. Never contents (Write's text, Edit's strings).
-_TOOL_FIELD = {"WebSearch": "query", "WebFetch": "url", "Bash": "command", "Read": "file_path",
+_TOOL_FIELD = {"WebSearch": "query", "WebFetch": "url", "Read": "file_path",  # Bash: see _bash
                "Write": "file_path", "Edit": "file_path", "Glob": "pattern", "Grep": "pattern",
                "ToolSearch": "query"}
+
+
+def _bash(inp):
+    """A command without what it writes: its first line, cut at a heredoc, quoted strings masked, plus the
+    agent's own one-line description. ponytail: unquoted secrets (curl -u user:pass) still show; mask
+    by pattern if errands ever pass credentials on the command line."""
+    cmd = str(inp.get("command") or "").strip().split("\n", 1)[0].split("<<", 1)[0]
+    cmd = " ".join(re.sub(r"'[^']*'|\"[^\"]*\"", "…", cmd).split())
+    desc = str(inp.get("description") or "").strip()
+    return f"{cmd} ({desc})" if desc else cmd
 
 
 def action(tool_name, tool_input):
@@ -38,6 +48,8 @@ def action(tool_name, tool_input):
         parts = [str(inp[k]) for k in _FIELDS if inp.get(k) and not (k == "key" and len(str(inp[k])) == 1)]
         if isinstance(inp.get("fields"), list):  # fill_form: the field names only
             parts += [str(f["name"]) for f in inp["fields"] if isinstance(f, dict) and f.get("name")]
+    elif name == "Bash":
+        parts = [_bash(inp)]
     else:
         parts = [str(inp[_TOOL_FIELD[name]])] if inp.get(_TOOL_FIELD.get(name, "")) else []
     name = name.removeprefix("mcp__browser__")

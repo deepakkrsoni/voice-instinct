@@ -254,6 +254,16 @@ def test_web_searches_and_other_tools_are_recorded_without_a_screenshot(tmp_path
     assert tg.sent[-1][1].startswith("Errand steps") and tg.sent[-1][1].splitlines()[-1].startswith("done: 5 steps")
 
 
+def test_what_the_agent_writes_through_the_shell_is_never_recorded():
+    # Opus review of PR #21: a full Bash command carries what it writes (heredocs, echo, auth headers).
+    heredoc = action("Bash", {"command": "cat > notes.md <<'EOF'\nmy address is 12 MG Road\nEOF",
+                              "description": "Save the shortlist"})
+    assert heredoc == "Bash: cat > notes.md (Save the shortlist)"
+    quoted = action("Bash", {"command": 'curl -s -H "Authorization: Bearer sk-secret" https://api.example/x'})
+    assert "sk-secret" not in quoted and quoted.startswith("Bash: curl -s -H") and "https://api.example/x" in quoted
+    assert "pin 1234" not in action("Bash", {"command": "echo 'pin 1234' > secret.txt"})
+
+
 def test_browser_tools_that_only_look_are_recorded_without_a_screenshot(tmp_path):
     hub, calls = _shots(tmp_path)
 
