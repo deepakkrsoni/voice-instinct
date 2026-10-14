@@ -12,9 +12,9 @@ from fastapi import APIRouter, HTTPException, Request
 from loguru import logger
 
 _EVENTS = ("PermissionRequest", "Stop", "SessionEnd", "SessionStart")
-# Debug mode's step hook (steps.py): the errand browser's tools that change the page.
-STEP_MATCHER = ("mcp__browser__browser_(navigate|navigate_back|click|type|fill_form|select_option"
-                "|press_key|hover|drag|drop)")
+# Debug mode's step hook (steps.py): every tool the agent uses. steps.SCREENSHOT_TOOLS picks the ones
+# that change the page and get a screenshot.
+STEP_MATCHER = "*"
 
 
 def hook_response(decision):

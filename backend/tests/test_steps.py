@@ -55,7 +55,8 @@ def _hub(tmp_path, shoot=None, launch=None, telegram=None):
 
 
 def _step(sid="s1", tool="mcp__browser__browser_click", inp=None, resp=None):
-    return {"session_id": sid, "tool_name": tool, "tool_input": inp or {"element": "Search flights", "ref": "e3"},
+    return {"session_id": sid, "tool_name": tool,
+            "tool_input": {"element": "Search flights", "ref": "e3"} if inp is None else inp,
             "tool_response": resp}
 
 
@@ -209,6 +210,82 @@ def test_no_browser_means_an_ordinary_errand_and_the_record_says_why(tmp_path):
 def test_not_installed_means_no_capture(tmp_path):
     hub = StepHub(tmp_path)  # no ~/.voice-instinct here
     assert asyncio.run(hub.start("s1", tmp_path)) is None
+
+
+def _shots(tmp_path, telegram=None, launch=None):
+    """A hub whose screenshotter records every call."""
+    calls = []
+
+    async def shoot(port, url=None):
+        calls.append(port)
+        return PNG
+
+    hub, _ = _hub(tmp_path, shoot=shoot, launch=launch, telegram=telegram)
+    return hub, calls
+
+
+def test_web_searches_and_other_tools_are_recorded_without_a_screenshot(tmp_path):
+    # An errand researched with WebSearch alone recorded "0 steps": now every tool call is a step.
+    tg = FakeTelegram()
+    hub, calls = _shots(tmp_path, telegram=tg)
+    steps = [("WebSearch", {"query": "cotton t-shirt under 500 rupees"}),
+             ("WebFetch", {"url": "https://shop.example/tees", "prompt": "list prices"}),
+             ("Bash", {"command": "ls -la"}),
+             ("Write", {"file_path": "notes.md", "content": "my address is 12 MG Road"}),
+             ("ToolSearch", {"query": "select:mcp__browser__browser_navigate"})]
+
+    async def go():
+        await hub.start("s1", tmp_path)
+        for tool, inp in steps:
+            assert await hub.on_step(_step(tool=tool, inp=inp)) == {}
+        rec = hub._runs["s1"].rec
+        await hub.finish("s1", "done")
+        await _drain(hub)
+        return rec
+
+    rec = asyncio.run(go())
+    lines = [l for l in (rec.dir / "steps.md").read_text().splitlines() if l[:1].isdigit()]
+    assert [l.split(" ", 2)[2] for l in lines] == [
+        "WebSearch: cotton t-shirt under 500 rupees", "WebFetch: https://shop.example/tees", "Bash: ls -la",
+        "Write: notes.md", "ToolSearch: select:mcp__browser__browser_navigate"]
+    assert calls == [] and not list(rec.dir.glob("*.png"))
+    assert "12 MG Road" not in (rec.dir / "steps.md").read_text()  # what it wrote, never
+    assert [k for k, _ in tg.sent] == ["message"] * 6  # five steps, then the report
+    assert tg.sent[-1][1].startswith("Errand steps") and tg.sent[-1][1].splitlines()[-1].startswith("done: 5 steps")
+
+
+def test_browser_tools_that_only_look_are_recorded_without_a_screenshot(tmp_path):
+    hub, calls = _shots(tmp_path)
+
+    async def go():
+        await hub.start("s1", tmp_path)
+        await hub.on_step(_step(tool="mcp__browser__browser_snapshot", inp={}))
+        await hub.on_step(_step(tool="mcp__browser__browser_navigate", inp={"url": "https://shop.example/"}))
+        return hub._runs["s1"].rec
+
+    rec = asyncio.run(go())
+    lines = [l for l in (rec.dir / "steps.md").read_text().splitlines() if l[:1].isdigit()]
+    assert lines[0].endswith("browser_snapshot") and lines[1].endswith("browser_navigate: https://shop.example/ → 002.png")
+    assert len(calls) == 1  # only the step that changed the page
+
+
+def test_with_capture_off_every_step_is_still_recorded(tmp_path):
+    async def broken(exe):
+        raise RuntimeError("the debug browser did not start")
+
+    hub, calls = _shots(tmp_path, launch=broken)
+
+    async def go():
+        await hub.start("s1", tmp_path)
+        await hub.on_step(_step(tool="WebSearch", inp={"query": "t-shirts"}))
+        await hub.on_step(_step())
+        return hub._runs["s1"].rec
+
+    rec = asyncio.run(go())
+    lines = [l for l in (rec.dir / "steps.md").read_text().splitlines() if l[:1].isdigit()]
+    assert lines[0].endswith("WebSearch: t-shirts")
+    assert lines[1].endswith("browser_click: Search flights (no screenshot: debug capture off)")
+    assert calls == []
 
 
 def test_finishing_closes_the_browser_and_sends_the_report_last(tmp_path):

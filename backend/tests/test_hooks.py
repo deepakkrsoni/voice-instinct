@@ -1,6 +1,5 @@
 import asyncio
 import json
-import re
 import stat
 from pathlib import Path
 
@@ -243,9 +242,6 @@ def test_the_step_hook_is_added_only_for_debug_runs(tmp_path):
     assert entry["hooks"][0]["timeout"] == 15
 
 
-def test_the_step_matcher_covers_page_changing_tools_only():
-    for t in ("navigate", "navigate_back", "click", "type", "fill_form", "select_option",
-              "press_key", "hover", "drag", "drop"):
-        assert re.fullmatch(STEP_MATCHER, f"mcp__browser__browser_{t}"), t
-    for t in ("snapshot", "take_screenshot", "wait_for", "tabs", "console_messages"):
-        assert not re.fullmatch(STEP_MATCHER, f"mcp__browser__browser_{t}"), t
+def test_the_step_hook_sees_every_tool_the_agent_uses():
+    # An errand researched with WebSearch alone recorded "0 steps" when only browser tools were hooked.
+    assert STEP_MATCHER == "*"  # Claude Code's matcher for every tool

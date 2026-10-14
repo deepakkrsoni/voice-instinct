@@ -40,15 +40,16 @@ use the 40-language Nemotron or the previous Parakeet engine, set `engine` under
 `config.toml` to `nemotron-multilingual` or `parakeet`, then re-run `./install.sh` (it downloads only
 the chosen model, about 450 MB) and restart. Nemotron's weights are under the NVIDIA Open Model License.
 
-## Debug mode: see every browser step
+## Debug mode: see every step
 
-To check what the agent does in the browser, set `browser_steps = true` under `[debug]` in
-`config.toml` and restart (`systemctl --user restart voice-instinct`). Every page-changing step of
-an errand (open a page, click, type, submit) is then screenshotted into the errand's folder, under
-`debug/`, with `steps.md` listing each step and how the errand ended. What the agent typed is never
-written down, but the address of every page it opens is, including any codes in a link it follows.
+To check what the agent does, set `browser_steps = true` under `[debug]` in `config.toml` and
+restart (`systemctl --user restart voice-instinct`). Every step of an errand is then written to
+`steps.md` in the errand's folder, under `debug/`: each web search with its query, each page it
+fetches or opens, each command, and how the errand ended. Browser steps that change the page (open
+a page, click, type, submit) also get a screenshot. What the agent typed or wrote is never written
+down, but the address of every page it opens is, including any codes in a link it follows.
 
-To also get each screenshot in Telegram, create a bot with @BotFather, send it a message, and put
+To also get each step and screenshot in Telegram, create a bot with @BotFather, send it a message, and put
 its token and your chat id in `.env`:
 
     TELEGRAM_BOT_TOKEN=123456:ABC...
