@@ -1,11 +1,13 @@
 import asyncio
 import json
+import re
 import stat
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from hooks import HookBridge, hook_response, load_token, make_router, write_run_settings
+from hooks import STEP_MATCHER, HookBridge, hook_response, load_token, make_router, write_run_settings
 from registry import Registry
 
 
@@ -229,3 +231,21 @@ def test_web_requests_are_described_in_words_not_json():
     assert describe("WebFetch", {"url": "https://example.com/deals", "prompt": "find prices"}) == "WebFetch: https://example.com/deals"
     assert describe("WebSearch", {"query": "cheap flights to Goa"}) == "WebSearch: cheap flights to Goa"
     assert describe("Edit", "not a dict").startswith("Edit")  # never crashes into a silent denial
+
+
+def test_the_step_hook_is_added_only_for_debug_runs(tmp_path):
+    plain = json.loads(Path(write_run_settings(tmp_path, "a", "tok", 7860)).read_text())
+    assert "PostToolUse" not in plain["hooks"]
+    debug = json.loads(Path(write_run_settings(tmp_path, "b", "tok", 7860, step_hook=True)).read_text())
+    (entry,) = debug["hooks"]["PostToolUse"]
+    assert entry["matcher"] == STEP_MATCHER
+    assert entry["hooks"][0]["url"] == "http://127.0.0.1:7860/hook/tok/PostToolUse"
+    assert entry["hooks"][0]["timeout"] == 15
+
+
+def test_the_step_matcher_covers_page_changing_tools_only():
+    for t in ("navigate", "navigate_back", "click", "type", "fill_form", "select_option",
+              "press_key", "hover", "drag", "drop"):
+        assert re.fullmatch(STEP_MATCHER, f"mcp__browser__browser_{t}"), t
+    for t in ("snapshot", "take_screenshot", "wait_for", "tabs", "console_messages"):
+        assert not re.fullmatch(STEP_MATCHER, f"mcp__browser__browser_{t}"), t

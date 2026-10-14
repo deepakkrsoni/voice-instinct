@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from autonomy import sandbox_settings
+from autonomy import browser_mcp, sandbox_settings, with_debug_record
 from hooks import write_run_settings
 
 HOME, APP, DATA = Path("/home/u"), Path("/home/u/voice-agent"), Path("/home/u/.voice-instinct")
@@ -117,3 +117,28 @@ def test_errand_browser_is_offered_only_with_its_own_chromium(tmp_path):
 def test_large_shell_output_stays_inline_because_its_overflow_file_is_unreadable():
     # Claude Code saves output past the inline limit under ~/.claude, which the agent cannot read.
     assert sandbox_settings(HOME, APP, DATA)["bashOutputMaxChars"] == 128000
+
+
+def _install_browser(home):
+    vi = home / ".voice-instinct"
+    for f in ("node/bin/node", "browser/node_modules/@playwright/mcp/cli.js"):
+        (vi / f).parent.mkdir(parents=True, exist_ok=True)
+        (vi / f).touch()
+    (vi / "browser/browsers").mkdir(parents=True, exist_ok=True)
+    return vi / "browser/node_modules/@playwright/mcp/cli.js"
+
+
+def test_browser_mcp_attaches_to_a_given_cdp_endpoint_instead_of_launching(tmp_path):
+    cli = _install_browser(tmp_path)
+    assert browser_mcp(tmp_path)["mcpServers"]["browser"]["args"] == [
+        str(cli), "--browser", "chromium", "--headless", "--isolated"]
+    assert browser_mcp(tmp_path, cdp_endpoint="http://127.0.0.1:9")["mcpServers"]["browser"]["args"] == [
+        str(cli), "--cdp-endpoint", "http://127.0.0.1:9"]
+
+
+def test_debug_runs_deny_edits_to_the_record_without_changing_the_shared_settings():
+    base = sandbox_settings(HOME, APP, DATA)
+    debug = with_debug_record(base, HOME / "trip", HOME)
+    assert "Edit(~/trip/debug/**)" in debug["permissions"]["deny"]
+    assert "Edit(~/trip/debug/**)" not in base["permissions"]["deny"]
+    assert debug["sandbox"] == base["sandbox"]
