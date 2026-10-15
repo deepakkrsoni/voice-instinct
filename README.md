@@ -53,6 +53,12 @@ Built on [Pipecat](https://docs.pipecat.ai).
 - Speech recognition and synthesis run locally, and sessions and questions are logged only on your
   machine in `~/.voice-instinct/`, readable only by you. The models you choose see the conversation
   and the task (Gemini and Claude are cloud services); use Ollama for a local front model.
+- Only your voice, once you enrol: run `cd backend && uv run enroll.py` (one minute, six lines), then
+  restart. Other people, the TV and its own voice can then no longer wake it, give it commands or cut
+  it off, and speech that isn't yours is never transcribed. The voiceprint stays in
+  `~/.voice-instinct/` and `uv run enroll.py --delete` removes it. If it misses you, lower
+  `[voice] threshold` in `config.toml` (default 0.35); if others get through, raise it. Needs the
+  Parakeet engine. Say "stop" to send it away; running errands carry on.
 
 Using a subscription CLI this way depends on the vendor's terms; check them before relying on it.
 

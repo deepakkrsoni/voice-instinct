@@ -44,6 +44,8 @@ def test_clean_checkout_dry_run_finishes(tmp_path):
     assert "create config.toml from config.example.toml" in r.stdout
     assert 'Done. Say "Hey Nova"' in r.stdout
     assert "systemctl --user restart voice-instinct.service" in r.stdout  # update re-run restarts the backend
+    assert "3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx" in r.stdout  # speaker model (#32)
+    assert "uv run enroll.py" in r.stdout
 
 
 def test_uv_resolved_from_local_bin_after_install(tmp_path):

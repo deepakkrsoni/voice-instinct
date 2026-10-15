@@ -26,6 +26,9 @@ case "$(uname -m)" in
 esac
 MODELS="$HOME_DIR/.voice-instinct/models"
 ASR_MODELS="https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models"
+SPEAKER_URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models"  # sic
+SPEAKER_MODEL="3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx"
+SPEAKER_SHA="357a834f702b80161e5b981182c038e18553c1f2ca752ed6cec2052365d4129b"
 KOKORO_BASE="https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
 KOKORO_ONNX_SHA="7d5df8ecf7d4b1878015a32686053fd0eebe2bc377234608764cc0ef3636a6c5"
 KOKORO_VOICES_SHA="bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d"
@@ -93,6 +96,8 @@ models() {
   fi
   fetch "$KOKORO_BASE/kokoro-v1.0.onnx" "$MODELS/kokoro/kokoro-v1.0.onnx" "$KOKORO_ONNX_SHA"
   fetch "$KOKORO_BASE/voices-v1.0.bin" "$MODELS/kokoro/voices-v1.0.bin" "$KOKORO_VOICES_SHA"
+  # speaker check (#32): only the enrolled owner's voice is heard (backend/voiceprint.py SPEAKER_MODEL)
+  fetch "$SPEAKER_URL/$SPEAKER_MODEL" "$MODELS/$SPEAKER_MODEL" "$SPEAKER_SHA"
 }
 
 # cfgval <key>: value from config.toml, else config.example.toml; never fails (no pipefail abort on a missing file)
@@ -269,3 +274,4 @@ if [ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ]; then
 else
   say "Done. Start the orb with $LAUNCHER (it starts by itself from your next login), then say \"Hey ${name:-Nova}\"."
 fi
+say "To make it answer only your voice (one minute): cd $REPO/backend && uv run enroll.py"
