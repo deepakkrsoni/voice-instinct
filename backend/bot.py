@@ -121,7 +121,8 @@ async def bot(runner_args: RunnerArguments):
                                 timeout=cfg.backend_timeout, permission_mode=cfg.permission_mode,
                                 hide_env=(cfg.api_key_env, "TELEGRAM_CHAT_ID"),  # the bot token goes as *_TOKEN
                                 mcp_config=_browser_config())
-    llm = build_llm(cfg, SYSTEM_PROMPT if backend.available() else SYSTEM_PROMPT + NO_AGENT)
+    prompt = f"Your name is {cfg.name}. " + SYSTEM_PROMPT  # set in config.toml; never from history
+    llm = build_llm(cfg, prompt if backend.available() else prompt + NO_AGENT)
     tools = []
     if backend.available():
         autonomy = sandbox_settings(Path.home(), REPO_ROOT, DATA, hook_port=HOOK_PORT)

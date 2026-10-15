@@ -18,7 +18,7 @@ from pipecat.utils.context.llm_context_summarization import LLMAutoContextSummar
 # Pipecat's default prompt dropped errand ids (so a follow-up could no longer resume its errand), and the
 # summary is stored as a user-role message, so text from tools and web pages must never come out of it
 # as the user's own words (Opus review of #24).
-SUMMARY_PROMPT = """You are summarizing a conversation between a user and Nova, a voice errand assistant.
+SUMMARY_PROMPT = """You are summarizing a conversation between a user and a voice errand assistant.
 
 Keep, in clear factual statements:
 - Every errand, one line each, as "errand <id>: <what was asked> — <outcome or status>". Keep every
@@ -37,7 +37,7 @@ ASSISTANT_PARAMS = LLMAssistantAggregatorParams(
     enable_auto_context_summarization=True,
     auto_context_summarization_config=LLMAutoContextSummarizationConfig(summary_config=LLMContextSummaryConfig(
         summarization_prompt=SUMMARY_PROMPT,
-        summary_message_template="Summary of the conversation so far (written by Nova, not the user's words): {summary}",
+        summary_message_template="Summary of the conversation so far (written by the assistant, not the user's words): {summary}",
     )),
 )
 
