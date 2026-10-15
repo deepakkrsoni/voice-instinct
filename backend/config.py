@@ -42,7 +42,7 @@ class Config:
     permission_mode: str = "auto"  # Claude Code mode for delegated runs; the sandbox bounds what auto may do
     debug_browser_steps: bool = False  # screenshot every errand browser step (steps.py)
     stt_engine: str = "nemotron"  # speech-to-text engine (services.make_stt); install.sh downloads only this one
-    voice_threshold: float = 0.35  # owner-voice cut-off (voiceprint.py); spike #32: owner >= 0.46, others <= 0.18
+    voice_threshold: float = 0.6  # owner-voice cut-off (voiceprint.py); spike 2 (#32): EER 0 to 5% at 0.60
 
     @property
     def wake_phrases(self) -> list[str]:

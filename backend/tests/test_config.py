@@ -149,7 +149,7 @@ def test_hay_spelled_the_way_nemotron_writes_hey_also_wakes_it():
 def test_voice_threshold_defaults_and_is_validated(tmp_path):
     p = tmp_path / "config.toml"
     p.write_text("")
-    assert load(p).voice_threshold == 0.35
+    assert load(p).voice_threshold == 0.6
     p.write_text("[voice]\nthreshold = 0.5\n")
     assert load(p).voice_threshold == 0.5
     for bad in ("1.5", "-0.1", "true", '"high"'):

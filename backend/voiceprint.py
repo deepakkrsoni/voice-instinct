@@ -1,7 +1,9 @@
-"""The owner's voice (#32): a CAM++ speaker embedding saved by enroll.py, checked on every segment and
-before every interruption. No voiceprint file means the check is off and every voice is accepted."""
+"""The owner's voice (#32): a TitaNet-small speaker embedding, made by enrolling through Milo itself
+(enrolment.py) and checked on every Parakeet segment. No voiceprint file means the check is off.
 
-import asyncio
+Spike 2 (orb audio, 26 owner lines, 25 phone segments): EER 0 to 5%, cut-off 0.60. Speech only, because a
+segment is mostly silence; cohort-centred, because short clips share a lot whoever speaks."""
+
 import functools
 import json
 import os
@@ -11,16 +13,16 @@ from pathlib import Path
 import numpy as np
 from loguru import logger
 
-from pipecat.frames.frames import InputAudioRawFrame, VADUserStartedSpeakingFrame, VADUserStoppedSpeakingFrame
-from pipecat.turns.types import ProcessFrameResult
-from pipecat.turns.user_start.base_user_turn_start_strategy import BaseUserTurnStartStrategy
-
-SPEAKER_MODEL = "3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx"  # spike #32: 6 ms a clip, 0 errors
+SPEAKER_MODEL = "nemo_en_titanet_small.onnx"
+MIN_SPEECH_SECS = 0.25  # under this, a cough or a click: never judged as a voice
+COHORT_VOICES = ("am_adam", "am_michael", "bf_emma", "af_bella", "bm_george", "af_nicole", "am_echo",
+                 "bm_lewis", "hf_alpha", "hm_omega", "hf_beta", "hm_psi")  # Kokoro; spike 2's cohort
 WAKE_PREFIXES = ("hey", "hay", "okay", "ok", "o k")  # as Config.wake_phrases, plus Parakeet's "O K"
+FRAME = 320  # 20 ms
 
 
 def voiceprint_path(cfg) -> Path:
-    return Path(cfg.data_dir).expanduser() / "voiceprint.npy"
+    return Path(cfg.data_dir).expanduser() / "voiceprint.npz"
 
 
 def learned_path(cfg) -> Path:
@@ -29,6 +31,16 @@ def learned_path(cfg) -> Path:
 
 def speaker_model_path(cfg) -> Path:
     return Path(cfg.models_dir).expanduser() / SPEAKER_MODEL
+
+
+def speech_only(pcm: bytes) -> np.ndarray:
+    """The 20 ms frames above RMS 0.02, plus 2 each side. Orb audio is noise suppressed: silence is ~0.0005."""
+    # ponytail: fixed energy gate tuned on the orb's audio; a raw (unsuppressed) mic needs Silero instead.
+    x = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
+    n = len(x) // FRAME
+    f = x[: n * FRAME].reshape(n, FRAME)
+    keep = np.convolve(np.sqrt((f**2).mean(1)) > 0.02, np.ones(5), "same") > 0
+    return f[keep].ravel()
 
 
 @functools.cache  # one copy for every session, like the recognisers
@@ -40,55 +52,96 @@ def _extractor(model_path: Path):
 
 
 def embed_with(model_path: Path):
-    def embed(pcm: bytes, rate: int = 16000) -> np.ndarray:
+    def embed(samples: np.ndarray) -> np.ndarray:
         ex = _extractor(model_path)
         s = ex.create_stream()
-        s.accept_waveform(rate, np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0)
+        s.accept_waveform(16000, samples)
         s.input_finished()
         v = np.array(ex.compute(s))
         return v / np.linalg.norm(v)
     return embed
 
 
+def cohort_mean(embed, kokoro_paths) -> np.ndarray:
+    """The mean embedding of COHORT_VOICES saying one line: what any voice shares, removed before scoring."""
+    import soxr
+    from kokoro_onnx import Kokoro
+
+    k = Kokoro(*map(str, kokoro_paths))
+    out = []
+    for voice in COHORT_VOICES:
+        a, sr = k.create("Book a table for two tonight and remind me later.", voice=voice)
+        out.append(embed(soxr.resample(a, sr, 16000).astype(np.float32)))
+    return np.mean(out, axis=0)
+
+
+def _centre(e, mean):
+    c = e - mean
+    return c / np.linalg.norm(c)
+
+
+def build_vector(embeddings, mean) -> np.ndarray:
+    v = np.mean([_centre(e, mean) for e in embeddings], axis=0)
+    return v / np.linalg.norm(v)
+
+
 class Voiceprint:
-    def __init__(self, vector, threshold: float, embed=None):
-        self.vector, self.threshold, self._embed = vector, threshold, embed
+    def __init__(self, vector=None, mean=None, threshold: float = 0.6, embed=None):
+        self.vector, self.mean, self.threshold, self._embed = vector, mean, threshold, embed
 
     @property
     def enrolled(self) -> bool:
         return self.vector is not None
 
+    def set(self, vector, mean) -> None:
+        self.vector, self.mean = vector, mean
+
+    def clear(self) -> None:
+        self.vector = self.mean = None
+
     @classmethod
     def load(cls, cfg, embed=None) -> "Voiceprint":
         path = voiceprint_path(cfg)
+        model = speaker_model_path(cfg)
+        if embed is None and model.exists():
+            embed = embed_with(model)
         if not path.exists():
             logger.info("voice check off: run `uv run enroll.py` so only your voice is heard")
-            return cls(None, cfg.voice_threshold)
+            return cls(None, None, cfg.voice_threshold, embed)
+        data = np.load(path)
+        if str(data["model"]) != SPEAKER_MODEL:
+            logger.warning(f"voice check off: {path} was made with another model; run enroll.py again")
+            return cls(None, None, cfg.voice_threshold, embed)
         if embed is None:
-            model = speaker_model_path(cfg)
-            if not model.exists():
-                raise RuntimeError(f"The speaker model is not installed ({model}). Run ./install.sh.")
-            embed = embed_with(model)
-        return cls(np.load(path), cfg.voice_threshold, embed)
+            raise RuntimeError(f"The speaker model is not installed ({model}). Run ./install.sh.")
+        return cls(data["vector"], data["mean"], cfg.voice_threshold, embed)
 
-    def score(self, pcm: bytes, rate: int = 16000) -> float:
-        return float(self._embed(pcm, rate) @ self.vector)
+    def score(self, pcm: bytes) -> float | None:
+        """Similarity to the owner, or None when there is too little speech to judge."""
+        x = speech_only(pcm)
+        if len(x) < MIN_SPEECH_SECS * 16000:
+            return None
+        return float(_centre(self._embed(x), self.mean) @ self.vector)
 
-    def is_owner(self, pcm: bytes, rate: int = 16000) -> bool:
+    def is_owner(self, pcm: bytes) -> bool:
         if not self.enrolled:
             return True
-        s = self.score(pcm, rate)
-        logger.debug(f"voice check {s:.2f}: {'owner' if s >= self.threshold else 'not the owner'}")
-        return s >= self.threshold
+        s = self.score(pcm)
+        logger.debug(f"voice check {s}: {'owner' if s is not None and s >= self.threshold else 'not the owner'}")
+        return s is not None and s >= self.threshold
 
 
-def save_voiceprint(cfg, vectors) -> None:
-    v = np.mean(vectors, axis=0)
+def save_voiceprint(cfg, vector, mean) -> None:
     path = voiceprint_path(cfg)
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "wb") as f:
-        np.save(f, v / np.linalg.norm(v))
+        np.savez(f, vector=vector, mean=mean, model=np.array(SPEAKER_MODEL))
     os.chmod(path, 0o600)  # an existing file keeps its old mode otherwise
+
+
+def delete_voiceprint(cfg) -> None:
+    for p in (voiceprint_path(cfg), voiceprint_path(cfg).with_suffix(".npy"), learned_path(cfg)):
+        p.unlink(missing_ok=True)  # .npy: revision 1's CAM++ voiceprint
 
 
 def learn_spellings(transcripts, name: str) -> list[str]:
@@ -116,44 +169,9 @@ def learned_wake_phrases(cfg) -> list[str]:
         return []
     try:
         phrases = json.loads(path.read_text())
+        if not isinstance(phrases, list):
+            raise TypeError("not a list")
         return [p for p in phrases if isinstance(p, str) and p.strip()]
     except (ValueError, TypeError):
         logger.warning(f"{path} is not a JSON list of phrases; ignoring it (run enroll.py again)")
         return []
-
-
-class OwnerVADUserTurnStartStrategy(BaseUserTurnStartStrategy):
-    """Pipecat's VADUserTurnStartStrategy, but the turn (and so the interruption) starts only once the
-    first CHECK_SECS of speech is the owner's. The user aggregator feeds every frame, audio included, to
-    its start strategies (pinned by test_owner_start against Pipecat 1.12)."""
-
-    CHECK_SECS = 1.0  # spike #32: others' 1 s windows scored at most 0.15
-    MIN_SECS = 0.4  # shorter than this is left to the transcript check
-
-    def __init__(self, voiceprint, **kwargs):
-        super().__init__(**kwargs)
-        self._voiceprint = voiceprint
-        self._buf: bytearray | None = None  # collecting since the last VAD start
-        self._rate = 16000
-
-    async def process_frame(self, frame) -> ProcessFrameResult:
-        await super().process_frame(frame)
-        if isinstance(frame, VADUserStartedSpeakingFrame):
-            self._buf = bytearray()
-        elif isinstance(frame, InputAudioRawFrame) and self._buf is not None:
-            self._buf += frame.audio
-            self._rate = frame.sample_rate
-            if len(self._buf) >= self.CHECK_SECS * self._rate * 2:
-                return await self._decide()
-        elif isinstance(frame, VADUserStoppedSpeakingFrame) and self._buf is not None:
-            if len(self._buf) >= self.MIN_SECS * self._rate * 2:
-                return await self._decide()
-            self._buf = None
-        return ProcessFrameResult.CONTINUE
-
-    async def _decide(self) -> ProcessFrameResult:
-        pcm, self._buf = bytes(self._buf), None
-        if await asyncio.to_thread(self._voiceprint.is_owner, pcm, self._rate):
-            await self.trigger_user_turn_started()
-            return ProcessFrameResult.STOP
-        return ProcessFrameResult.CONTINUE
