@@ -25,7 +25,7 @@ from pipecat.frames.frames import TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.frameworks.rtvi.observer import RTVIObserverParams
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
-from conversation import ASSISTANT_PARAMS, make_context, save as save_conversation
+from conversation import ASSISTANT_PARAMS, make_context, save as save_conversation, scrub as scrub_conversation
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
@@ -46,7 +46,7 @@ from shutdown import cancel_on_exit
 from steps import StepHub
 from telegram import Telegram
 from enrolment import Enrolment, make_enrol_router
-from memory import Memory, make_memory_tools
+from memory import PROMPT as MEMORY_PROMPT, Memory, make_memory_tools
 from voiceprint import Voiceprint, cohort_mean, learned_wake_phrases
 from wake import handle_client_message, make_dismiss, make_wake
 
@@ -122,11 +122,7 @@ SYSTEM_PROMPT = (
     "errand id; for a new topic leave errand out. When you are told a session needs a decision, "
     "ask the user, then call answer_question after they answer. Use list_sessions to answer what "
     "you are working on and stop_session to stop one. "
-    "You remember the user across conversations: what you know is below, if anything. When they ask you to "
-    "remember something, or state a lasting detail about themselves, call remember (but \"remind me\" or "
-    "\"remember to\" do something at a time is a reminder: set_reminder); when they ask you to forget "
-    "something, call forget. Before saying you don't know something personal (a person, a place, a past plan), "
-    "call recall. "
+    + MEMORY_PROMPT +
     "You have no clock: for the time or date, or anything that depends on today, call current_time. "
     "For reminders, call current_time first, then set_reminder with the exact local time. "
     "Whenever the user signals they are done for now, in any words (bye, bye bye, goodbye, stop, stop for "
@@ -181,7 +177,8 @@ async def bot(runner_args: RunnerArguments):
     stt = make_stt(cfg, voiceprint=VOICEPRINT, enrolment=ENROLMENT, needs_check=wake.would_wake)
 
     tools = [make_dismiss(wake), current_time, *make_reminder_tools(registry, TELEGRAM),
-             *make_memory_tools(MEMORY)]  # with or without Claude
+             # forget also scrubs the conversation restored at every connect (context is set below, before any call)
+             *make_memory_tools(MEMORY, on_forget=lambda match: scrub_conversation(context, match, registry))]
     if backend.available():
         autonomy = sandbox_settings(Path.home(), REPO_ROOT, DATA, hook_port=HOOK_PORT)
         settings_for = lambda sid, debug_cwd=None: write_run_settings(

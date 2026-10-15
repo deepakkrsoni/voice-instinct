@@ -157,7 +157,7 @@ def test_the_nightly_run_writes_memory_but_has_no_network_or_web_and_no_secrets(
     s = consolidation_settings(HOME, APP, DATA)
     rules = s["permissions"]["deny"]
     assert "Edit(~/.voice-instinct/memory/**)" not in rules  # its own folder, journal included
-    assert not any("memory/journal" in r for r in rules)
+    assert not any(r.startswith("Read(") and "memory/journal" in r for r in rules)  # it reads the journal
     assert "Read(~/.ssh/**)" in rules and "Read(~/.voice-instinct/harness.db)" in rules
     assert "WebFetch" in rules and "WebSearch" in rules
     assert s["sandbox"]["network"] == {"allowedDomains": [], "strictAllowlist": True}
@@ -170,5 +170,8 @@ def test_the_nightly_run_cannot_plant_code_that_runs_outside_its_sandbox():
     # code later. .gitignore keeps the raw journal out of git history.
     from autonomy import consolidation_settings
     rules = consolidation_settings(HOME, APP, DATA)["permissions"]["deny"]
-    for p in (".git/**", ".claude/**", "CLAUDE.md", ".gitignore"):
+    # Nested too (review): Claude Code loads people/CLAUDE.md when it reads people/. The files it must leave
+    # alone (notes.md, .consolidated, the journal) are denied as well, not only asked of it.
+    for p in ("**/.git/**", "**/.claude/**", "**/CLAUDE.md", "**/CLAUDE.local.md", ".gitignore", "notes.md",
+              ".consolidated", "journal/**"):
         assert f"Edit(~/.voice-instinct/memory/{p})" in rules, p

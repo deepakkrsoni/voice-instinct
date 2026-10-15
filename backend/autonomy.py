@@ -72,11 +72,13 @@ def consolidation_settings(home, app_dir, data_dir) -> dict:
     text from errands, so it gets no network, no web tools and the same secret denials as errands."""
     s = sandbox_settings(home, app_dir, data_dir, errand=False)
     s["sandbox"]["network"] = {"allowedDomains": [], "strictAllowlist": True}
-    # Nothing it writes may run or steer code later (git hooks, its next run's settings and instructions), and
-    # .gitignore keeps the raw journal out of git history. Edit denies cover Bash too (merged into denyWrite).
+    # Nothing it writes may run or steer code later (git hooks, its next run's settings and instructions, at any
+    # depth: Claude Code loads people/CLAUDE.md when it reads people/), and .gitignore keeps the raw journal out
+    # of git history. The files our code owns are denied too. Edit denies cover Bash (merged into denyWrite).
     memory = _rule(Path(data_dir) / "memory", Path(home))
-    s["permissions"]["deny"] += ["WebFetch", "WebSearch",
-                                 *(f"Edit({memory}/{p})" for p in (".git/**", ".claude/**", "CLAUDE.md", ".gitignore"))]
+    s["permissions"]["deny"] += ["WebFetch", "WebSearch", *(f"Edit({memory}/{p})" for p in (
+        "**/.git/**", "**/.claude/**", "**/CLAUDE.md", "**/CLAUDE.local.md", ".gitignore", "notes.md",
+        ".consolidated", "journal/**"))]
     return s
 
 

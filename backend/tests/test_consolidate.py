@@ -94,6 +94,22 @@ def test_hand_edits_survive_a_failed_run(tmp_path):
     assert (m.root / "people/mum.md").exists() and not (m.root / "people/half.md").exists()
 
 
+def test_a_note_remembered_during_a_failed_run_survives_the_rollback(tmp_path):
+    m = mem(tmp_path)
+    m.remember("Is vegetarian")
+    late_fail = "echo '- 2026-10-16: Likes chai' >> notes.md\n" + FAIL
+    assert asyncio.run(consolidate(m, fake_claude(tmp_path, late_fail), TODAY)) is False
+    assert (m.root / "notes.md").read_text() == "- 2026-10-16: Is vegetarian\n- 2026-10-16: Likes chai\n"
+    assert (m.root / "profile.md").read_text() != "broken\n"
+
+
+def test_only_one_run_at_a_time(tmp_path):
+    m = mem(tmp_path)
+    with m.tidying():
+        assert asyncio.run(consolidate(m, fake_claude(tmp_path, OK), TODAY)) is False
+    assert not (tmp_path / "args").exists()
+
+
 def test_notes_are_kept_when_the_run_filed_nothing(tmp_path):
     m = mem(tmp_path)
     m.remember("Is vegetarian")

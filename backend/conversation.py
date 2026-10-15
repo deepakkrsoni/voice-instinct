@@ -7,6 +7,7 @@ signatures (raw bytes), are dropped. Probed: Gemini accepts a restored context w
 """
 
 import json
+import re
 
 from loguru import logger
 
@@ -99,3 +100,39 @@ def save(registry, context):
         registry.save_conversation(restorable(context.get_messages()))
     except Exception as e:  # never let saving break the conversation itself
         logger.warning(f"conversation not saved: {type(e).__name__}: {e}")
+
+
+FORGOTTEN = "(forgotten at the user's request)"
+
+
+def _scrub_text(text, match):
+    """Drop the sentences that match; the rest of a message (or a summary) stays."""
+    parts = re.split(r"(?<=[.!?\n])\s+", text)
+    kept = [s for s in parts if not match(s)]
+    return text if len(kept) == len(parts) else (" ".join(kept) or FORGOTTEN)
+
+
+def scrub(context, match, registry):
+    """forget (memory.py) reaches the one ongoing conversation too: it is restored at every connect (#24), so a
+    forgotten fact must leave it, its summary and its tool calls, and the saved copy."""
+    out = []
+    for m in context.get_messages():
+        if not isinstance(m, dict):
+            out.append(m)  # LLM-specific messages (thought signatures) hold no text
+            continue
+        m = json.loads(json.dumps(m))
+        if m.get("role") == "tool" and isinstance(m.get("content"), str) and match(m["content"]):
+            m["content"] = json.dumps({"forgotten": FORGOTTEN})
+        elif isinstance(m.get("content"), str):
+            m["content"] = _scrub_text(m["content"], match)
+        elif isinstance(m.get("content"), list):
+            for part in m["content"]:
+                if isinstance(part, dict) and isinstance(part.get("text"), str):
+                    part["text"] = _scrub_text(part["text"], match)
+        for call in m.get("tool_calls") or []:
+            fn = call.get("function") or {}
+            if isinstance(fn.get("arguments"), str) and match(fn["arguments"]):
+                fn["arguments"] = "{}"
+        out.append(m)
+    context.set_messages(out)
+    save(registry, context)

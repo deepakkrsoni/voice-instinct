@@ -29,7 +29,7 @@ def test_first_start_seeds_a_profile_with_location_and_commits_it(tmp_path):
     profile = (m.root / "profile.md").read_text()
     assert "Lives in India (timezone Asia/Kolkata)" in profile and "currency" in profile
     assert "When to act and when to ask" in profile and "How to talk" in profile
-    assert "profile" in log(m)
+    assert "memory: set up" in log(m)
     m.ensure()  # a second start keeps the user's own edits
     (m.root / "profile.md").write_text("# Profile\n- edited by hand\n")
     m.ensure()
@@ -121,7 +121,8 @@ def test_an_unusable_folder_turns_memory_off_without_raising(tmp_path):
 
 def test_the_tools_answer_nova(tmp_path):
     m = mem(tmp_path)
-    remember, forget, recall = make_memory_tools(m)
+    scrubbed = []
+    remember, forget, recall = make_memory_tools(m, on_forget=scrubbed.append)
     got = []
 
     async def cb(result, **kw):
@@ -133,7 +134,52 @@ def test_the_tools_answer_nova(tmp_path):
     asyncio.run(forget(p, text="Priya"))
     assert got[0]["status"] == "remembered"
     assert "my sister is Priya" in got[1]["found"]
-    assert got[2] == {"status": "forgotten", "lines_removed": 1, "removed": ["notes.md: - 2026-10-16: my sister is Priya"]}
+    assert got[2]["status"] == "forgotten" and got[2]["facts_removed"] == 1
+    assert got[2]["removed"] == ["notes.md: - 2026-10-16: my sister is Priya"] and "never use" in got[2]["instruction"]
+    assert scrubbed[0]("Priya called") and not scrubbed[0]("Asha called")  # the live conversation is scrubbed too
+    asyncio.run(forget(p, text="Priya"))
+    assert got[3]["status"] == "nothing_found"
+
+
+def test_forget_in_the_users_own_words_finds_the_third_person_fact(tmp_path):
+    # Review: "forget that I'm vegetarian" removed only the journal line and said "forgotten".
+    m = mem(tmp_path)
+    m.journal("user", "Remember that I'm vegetarian")
+    m.remember("Is vegetarian")
+    removed = m.forget("that I'm vegetarian")
+    assert "notes.md: - 2026-10-16: Is vegetarian" in removed and "vegetarian" not in m.context()
+    m.remember("José is my cousin")
+    assert m.forget("José") == ["notes.md: - 2026-10-16: José is my cousin"]  # not only ASCII words
+
+
+def test_while_the_nightly_run_tidies_the_tools_never_commit_and_forget_waits(tmp_path):
+    m = mem(tmp_path)
+    m.remember("Is vegetarian")
+    before = log(m)
+    with m.tidying():
+        m.remember("Likes chai")
+        assert log(m) == before  # its note is written, and the run commits it with its own work
+        assert "Likes chai" in m.context()
+        assert m.forget("vegetarian") is None  # the run could write it back: ask again in a few minutes
+    assert len(m.forget("vegetarian")) == 1
+    assert ".lock" in (m.root / ".gitignore").read_text()
+
+
+def test_a_users_commit_signing_setting_does_not_stop_commits(tmp_path):
+    m = mem(tmp_path)
+    subprocess.run(["git", "-C", str(m.root), "config", "commit.gpgsign", "true"], check=True)
+    subprocess.run(["git", "-C", str(m.root), "config", "gpg.program", "false"], check=True)
+    m.remember("Is vegetarian")
+    assert "remember" in log(m)
+
+
+def test_an_unreadable_memory_file_never_breaks_the_prompt_or_recall(tmp_path):
+    m = mem(tmp_path)
+    (m.root / "people").mkdir()
+    (m.root / "people/bad.md").write_bytes(b"# Bad\n\xff\xfe broken\n")
+    (m.root / "notes.md").write_bytes(b"\xff\xfe")
+    assert "Lives in India" in m.context()
+    assert m.recall("broken") == "" and m.forget("broken") == []
 
 
 def test_forget_matches_whole_words_and_refuses_common_words(tmp_path):

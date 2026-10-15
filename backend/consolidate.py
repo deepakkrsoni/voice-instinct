@@ -72,31 +72,57 @@ def _settings(memory):
 
 
 async def consolidate(memory, backend, today=None, settings=None) -> bool:
-    today = today or date.today()
+    """While it runs it holds memory's lock: the live tools never commit (they would stage its half-edits) and
+    forget waits (the run could write a forgotten fact back). The laptop usually wakes, and the user talks,
+    right when a missed 03:00 run catches up."""
+    try:
+        with memory.tidying():
+            return await _consolidate(memory, backend, today or date.today(), settings)
+    except BlockingIOError:
+        logger.warning("memory: another consolidation run is going")
+        return False
+
+
+def _lines(path):
+    return path.read_text().splitlines(keepends=True) if path.exists() else []
+
+
+async def _consolidate(memory, backend, today, settings) -> bool:
     journals, notes_path = pending(memory, today), memory.root / "notes.md"
-    notes = notes_path.read_text().splitlines(keepends=True) if notes_path.exists() else []
+    notes = _lines(notes_path)
     if not journals and not any(n.strip() for n in notes):
         logger.info("memory: nothing new to consolidate")
         return True
     files = [p.relative_to(memory.root).as_posix() for p in journals] + (["notes.md"] if notes else [])
-    memory.commit("hand edits")  # a failed run's rollback below must never take the user's own edits with it
+    memory.commit("hand edits", tidying=True)  # a failed run's rollback below must never take the user's own edits
+    if memory._git("status", "--porcelain").stdout.strip():
+        logger.error("memory: uncommitted changes could not be committed; not running, so none is lost")
+        return False
+    before = memory._git("rev-parse", "HEAD").stdout.strip()
+    # ponytail: a run killed mid-way (shutdown) is not rolled back; the next run commits its partial edits as
+    # "hand edits". Record `before` in a file and reset to it at the next start if that is ever seen.
     res = await backend.run(CONSOLIDATE_PROMPT + "\n\nInput files:\n" + "\n".join(files), cwd=str(memory.root),
                             settings=settings, extra_allowed=("Edit", "Write"))
-    if res.is_error:  # throw away its half-edits, never the journal
-        logger.error(f"memory: consolidation failed: {res.text[:200]}")
-        memory._git("checkout", "--", ".")
-        memory._git("clean", "-fdq", "-e", "journal")
-        return False
-    changed = bool(memory._git("status", "--porcelain").stdout.strip())
-    now = notes_path.read_text().splitlines(keepends=True) if notes_path.exists() else []
+    now = _lines(notes_path)
     late = now[len(notes):] if now[:len(notes)] == notes else [l for l in now if l not in notes]
+    if res.is_error:  # throw away its half-edits, never the journal, nor a note remembered meanwhile
+        logger.error(f"memory: consolidation failed: {res.text[:200]}")
+        memory._git("reset", "-q", "--hard", before)
+        memory._git("clean", "-fdq", "-e", "journal")
+        if late:
+            with open(notes_path, "a") as f:
+                f.writelines(late)
+        return False
+    memory._git("add", "-A")
+    changed = memory._git("diff", "--cached", "--quiet", before, "--", ".", ":(exclude)notes.md",
+                          check=False).returncode != 0
     if changed:  # notes are filed only if the run wrote something; otherwise they wait for the next run
         notes_path.write_text("".join(late))  # a remember during the run stays for the next one
     elif notes:
         logger.warning("memory: the run changed no file, so the notes are kept")
     with open(memory.root / ".consolidated", "a") as f:
         f.writelines(p.stem + "\n" for p in journals)
-    memory.commit("consolidate " + (" ".join(p.stem for p in journals) or "notes"))
+    memory.commit("consolidate " + (" ".join(p.stem for p in journals) or "notes"), tidying=True)
     done = _done(memory)
     for p in (memory.root / "journal").glob("*.md"):
         if p.stem in done and p.stem < (today - KEEP_JOURNALS).isoformat():
@@ -110,7 +136,6 @@ def main():
     memory = Memory(Path(cfg.data_dir).expanduser() / "memory")
     if not memory.ensure():
         return 1
-    # ponytail: no lock against the live remember/forget tools; at 03:00 a clash is rare. Add one if seen.
     backend = ClaudeCodeBackend(cmd=os.environ.get("VI_CLAUDE", "claude"), timeout=900, permission_mode="acceptEdits",
                                 hide_env=(cfg.api_key_env, "TELEGRAM_CHAT_ID"), system_prompt="")
     try:
