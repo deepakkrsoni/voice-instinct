@@ -24,7 +24,7 @@ def test_walks_the_lines_and_reports_what_it_learned():
     bot = FakeBot()
     assert run(cfg(), bot, say=said.append, sleep=lambda s: None) == 0
     assert ("POST", "/enrol/start") in bot.calls
-    assert any('"Hey Milo"' in s for s in said) and any("hey mailo" in s for s in said)
+    assert any('"Hey Milo, what time is it?"' in s for s in said) and any("hey mailo" in s for s in said)
 
 
 def test_bot_not_running_says_start_milo_first():
@@ -115,3 +115,18 @@ def test_with_the_real_enrolment_it_completes(tmp_path):
     said = []
     call, vp = _real_bot(tmp_path, cohort=lambda: np.array([0.0, 0.0, 2 ** -0.5]))
     assert run(cfg(), call, say=said.append, sleep=lambda s: None) == 0 and vp.enrolled
+
+
+
+def test_a_take_not_heard_as_the_wake_phrase_asks_to_say_it_again():
+    said, polls = [], []
+
+    def call(method, path):
+        if path == "/enrol/status":
+            polls.append(1)
+            n = len(polls)
+            return {"active": True, "heard": 0 if n < 3 else 5, "done": n >= 3, "rejected": 1 if n >= 2 else 0,
+                    "learned": []}
+        return {"active": True, "heard": 0, "done": False, "rejected": 0}
+    assert run(cfg(), call, say=said.append, sleep=lambda s: None) == 0
+    assert any("say it again" in s.lower() for s in said)

@@ -142,3 +142,12 @@ def test_once_enrolled_the_name_alone_and_its_merged_forms_wake_it():
     p = owner_wake_phrases("Nova")
     assert "nova" in p and {"inova", "anova", "enova", "hanova", "henova"} <= set(p)
     assert owner_wake_phrases("Big Ben")[0] == "big ben"
+
+
+
+@pytest.mark.parametrize("said, kept", [
+    ("Hey Mailo, what time is it?", ["hey mailo"]), ("Hey my luck, what time is it?", []),
+    ("Hey Milo, what time is it?", []),
+])
+def test_learn_spellings_from_the_part_before_the_request(said, kept):
+    assert learn_spellings([said], "Milo") == kept

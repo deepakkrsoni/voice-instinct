@@ -55,12 +55,15 @@ def run(cfg, call, say=print, sleep=time.sleep, delete=False) -> int:
         say(f"Can't enrol: {started['error']}")
         return 1
     say(f"Read each line to the orb, where you normally use {cfg.name}. It stays quiet while you do.")
-    heard = 0
+    heard = rejected = 0
     for i, line in enumerate(LINES, 1):
         say(f'\n[{i}/{len(LINES)}]  "{line.format(name=cfg.name)}"')
         for _ in range(WAIT_SECS * 4):
             st = call("GET", "/enrol/status") or {}
             heard = st.get("heard", heard)
+            if st.get("rejected", 0) > rejected:  # heard something, but not "Hey ..."
+                rejected = st["rejected"]
+                say("  Didn't catch that, say it again.")
             if heard >= i or st.get("done") or st.get("error"):
                 break
             sleep(0.25)

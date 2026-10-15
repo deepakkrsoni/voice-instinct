@@ -26,10 +26,10 @@ def make(tmp_path, clock=None):
 def test_five_segments_make_a_live_voiceprint_and_learned_spellings(tmp_path):
     e, vp, learned = make(tmp_path)
     e.start()
-    for text in ["Hey Milo.", "Hey Mailo", "Hey my luck", "Hey Milo, a", "Hey Milo, b"]:
+    for text in ["Hey Milo, a.", "Hey Mailo, b.", "Hey my luck, c.", "Hey Milo, d.", "Hey Milo, e."]:
         e.offer(speech(), text)
     assert not e.active and e.status() == {"active": False, "heard": 5, "done": True, "learned": ["hey mailo"],
-                                         "error": None}
+                                         "error": None, "rejected": 0}
     assert vp.enrolled and voiceprint_path(e.cfg).exists()
     assert json.loads(learned_path(e.cfg).read_text()) == ["hey mailo"] and learned == [["hey mailo"]]
 
@@ -81,8 +81,9 @@ def test_a_failure_building_the_voiceprint_is_logged_not_raised(tmp_path):
     assert not vp.enrolled and e.status()["done"] is False and e.status()["error"]
 
 
-def test_every_line_starts_with_the_wake_phrase():
-    assert len(LINES) == 5 and all(line.startswith("Hey {name}") for line in LINES)
+def test_every_line_is_the_wake_phrase_with_a_short_request():
+    # as the owner really wakes it: "Hey Nova, what time is it?" is heard right 9 times in 10, a bare one 3 in 8
+    assert len(LINES) == 5 and all(line.startswith("Hey {name}, ") for line in LINES)
 
 
 def test_start_without_the_speaker_model_says_run_install(tmp_path):
@@ -101,3 +102,16 @@ def test_delete_tells_the_bot_which_phrases_to_drop(tmp_path):
     learned_path(e.cfg).write_text('["hey mailo"]')
     e.delete()
     assert dropped == [["hey mailo"]]  # read before the file is removed
+
+
+
+def test_a_take_must_be_heard_as_the_wake_phrase(tmp_path):
+    # a cough, another voice or a relay note must not go into the voiceprint
+    e, _, _ = make(tmp_path)
+    e.start()
+    for text in ["", "A little bit", "You know what?"]:
+        e.offer(speech(), text)
+    assert e.status()["heard"] == 0 and e.status()["rejected"] == 3
+    for text in ["Hey Mailo, what time is it?", "Okay Milo, hi", "Milo, what's on today?"]:
+        e.offer(speech(), text)
+    assert e.status()["heard"] == 3

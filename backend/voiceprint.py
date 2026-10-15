@@ -156,22 +156,20 @@ def delete_voiceprint(cfg) -> None:
         p.unlink(missing_ok=True)  # .npy: revision 1's CAM++ voiceprint
 
 
+_SPELLING = re.compile(r"^(okay|ok|o k|hey|hay)[\s,]+([a-z]+)\s*(?:[,.!?]|$)")
+
+
 def learn_spellings(transcripts, name: str) -> list[str]:
-    """How Parakeet wrote the owner's wake phrase, kept only as a prefix plus exactly one word
-    ("hey mailo"). Two-word spellings ("hey my luck") are where ordinary sentences live."""
+    """How Parakeet wrote the owner's wake phrase, kept only as a prefix plus exactly one word before the
+    request ("Hey Mailo, what time is it?" gives "hey mailo"). Two words ("hey my luck, ...") are where
+    ordinary sentences live."""
     # ponytail: one-word rule only, a real word could slip in ("hey mile"); enroll.py prints what it learned.
     name = " ".join(name.lower().split())
     out = []
     for t in transcripts:
-        words = re.sub(r"[^\w\s]", "", t.lower()).split()
-        for prefix in WAKE_PREFIXES:
-            p = prefix.split()
-            if words[: len(p)] == p and len(words) == len(p) + 1:
-                word = words[-1]
-                phrase = f"{prefix} {word}"
-                if word != name and len(word) >= 3 and phrase not in out:
-                    out.append(phrase)
-                break
+        m = _SPELLING.match(t.lower().strip())
+        if m and m.group(2) != name and len(m.group(2)) >= 3 and f"{m.group(1)} {m.group(2)}" not in out:
+            out.append(f"{m.group(1)} {m.group(2)}")
     return out
 
 

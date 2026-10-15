@@ -4,6 +4,7 @@ every segment here instead of to the pipeline, so the assistant doesn't react to
 
 import hmac
 import json
+import re
 import threading
 import time
 
@@ -11,11 +12,13 @@ from fastapi import APIRouter, Header, HTTPException
 from loguru import logger
 
 from voiceprint import (MIN_SPEECH_SECS, build_vector, delete_voiceprint, learn_spellings, learned_path,
-                        learned_wake_phrases, save_voiceprint, speech_only)
+                        WAKE_PREFIXES, learned_wake_phrases, save_voiceprint, speech_only)
 
-# All start with the wake phrase, as Siri's setup does: the check judges only the wake phrase (#32).
-LINES = ["Hey {name}", "Hey {name}", "Hey {name}", "Hey {name}, what's the weather tomorrow?",
-         "Hey {name}, remind me to call mom at six."]
+# The wake phrase with a short request, as the owner really wakes it (#32): heard right 9 times in 10, where a
+# bare "Hey Nova" was heard right 3 times in 8.
+LINES = ["Hey {name}, what time is it?", "Hey {name}, what's the weather tomorrow?",
+         "Hey {name}, remind me to call mom at six.", "Hey {name}, find me a cheap flight.",
+         "Hey {name}, what am I working on?"]
 EXPIRE_SECS = 60  # enroll.py killed mid-way: the assistant hears normally again after this
 
 
@@ -26,6 +29,7 @@ class Enrolment:
         self._lock = threading.Lock()  # offer() runs in the STT's worker thread
         self._takes, self._since, self._done, self._learned, self._error = None, 0.0, False, [], None
         self._finishing = False  # all takes in, the voiceprint being built
+        self._rejected = 0  # segments not heard as the wake phrase: a cough, another voice, a relay note
 
     @property
     def ready(self) -> bool:
@@ -41,6 +45,7 @@ class Enrolment:
     def start(self):
         with self._lock:
             self._takes, self._since, self._done, self._learned, self._error = [], self._clock(), False, [], None
+            self._rejected = 0
         logger.info("enrolment started")
 
     def cancel(self):
@@ -53,6 +58,9 @@ class Enrolment:
                 return
             x = speech_only(pcm)
             if len(x) < MIN_SPEECH_SECS * 16000:
+                return
+            if not self._is_take(text):
+                self._rejected += 1
                 return
             self._takes.append((x, text))
             self._since = self._clock()
@@ -82,12 +90,19 @@ class Enrolment:
             self.on_learned(learned)
         logger.info(f"enrolled; learned {len(learned)} wake spelling(s)")
 
+    def _is_take(self, text: str) -> bool:
+        """Heard as the wake phrase: starts with a wake prefix, or has the name in it."""
+        words = re.sub(r"[^\w\s]", "", text.lower()).split()
+        return (any(words[: len(p.split())] == p.split() for p in WAKE_PREFIXES)
+                or self.cfg.name.lower().split()[0] in words)
+
     def status(self) -> dict:
         active = self.active
         with self._lock:
             heard = len(self._takes or []) if active else (len(LINES) if self._done or self._finishing else 0)
             return {"active": active, "heard": heard,
-                    "done": self._done, "learned": self._learned, "error": self._error}
+                    "done": self._done, "learned": self._learned, "error": self._error,
+                    "rejected": self._rejected}
 
     def delete(self):
         self.cancel()
