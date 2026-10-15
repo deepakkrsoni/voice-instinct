@@ -13,6 +13,7 @@ import json
 from autonomy import browser_mcp, sandbox_settings, with_debug_record
 from budget import TimeBudget
 from claude_cli import ClaudeCodeBackend
+from clock import current_time
 from config import REPO_ROOT, load
 from delegate import make_tools
 from gui import make_gui_router
@@ -103,6 +104,7 @@ SYSTEM_PROMPT = (
     "errand id; for a new topic leave errand out. When you are told a session needs a decision, "
     "ask the user, then call answer_question after they answer. Use list_sessions to answer what "
     "you are working on and stop_session to stop one. "
+    "You have no clock: for the time or date, or anything that depends on today, call current_time. "
     "Whenever the user signals they are done for now, in any words (bye, bye bye, goodbye, stop, stop for "
     "now, that's all, thanks that's it, go away, later), say one short goodbye and call dismiss: "
     "that ends the conversation and never stops an errand. Use stop_session only when they ask to stop "
@@ -152,7 +154,7 @@ async def bot(runner_args: RunnerArguments):
     # As Siri does: only a wake phrase said while asleep is voice-checked (#32)
     stt = make_stt(cfg, voiceprint=VOICEPRINT, enrolment=ENROLMENT, needs_check=wake.would_wake)
 
-    tools = [make_dismiss(wake)]  # "stop" works with or without Claude (#32)
+    tools = [make_dismiss(wake), current_time]  # these work with or without Claude
     if backend.available():
         autonomy = sandbox_settings(Path.home(), REPO_ROOT, DATA, hook_port=HOOK_PORT)
         settings_for = lambda sid, debug_cwd=None: write_run_settings(
