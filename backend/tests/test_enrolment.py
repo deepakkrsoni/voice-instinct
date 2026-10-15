@@ -115,3 +115,11 @@ def test_a_take_must_be_heard_as_the_wake_phrase(tmp_path):
     for text in ["Hey Mailo, what time is it?", "Okay Milo, hi", "Milo, what's on today?"]:
         e.offer(speech(), text)
     assert e.status()["heard"] == 3
+
+
+def test_spellings_are_learned_from_every_line(tmp_path):
+    e, _, learned = make(tmp_path)
+    e.start()
+    for text in ["Hey Milo, a.", "Hey Milo, b.", "Hey Milo, c.", "Hey Mailo, d.", "Hey Mylo, e."]:
+        e.offer(speech(), text)
+    assert e.status()["learned"] == ["hey mailo", "hey mylo"]  # lines 4 and 5 count too

@@ -82,7 +82,7 @@ class Enrolment:
         vector = build_vector([self._embed(x) for x, _ in takes], mean)
         save_voiceprint(self.cfg, vector, mean)
         self._vp.set(vector, mean)
-        learned = learn_spellings([t for _, t in takes[:3]], self.cfg.name)  # never kept, only the spellings
+        learned = learn_spellings([t for _, t in takes], self.cfg.name)  # never kept, only the spellings
         learned_path(self.cfg).write_text(json.dumps(learned))
         with self._lock:
             self._done, self._learned = True, learned
