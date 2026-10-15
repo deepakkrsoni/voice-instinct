@@ -26,6 +26,9 @@ case "$(uname -m)" in
 esac
 MODELS="$HOME_DIR/.voice-instinct/models"
 ASR_MODELS="https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models"
+SPEAKER_URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models"  # sic
+SPEAKER_MODEL="nemo_en_titanet_small.onnx"
+SPEAKER_SHA="ad4a1802485d8b34c722d2a9d04249662f2ece5d28a7a039063ca22f515a789e"
 KOKORO_BASE="https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
 KOKORO_ONNX_SHA="7d5df8ecf7d4b1878015a32686053fd0eebe2bc377234608764cc0ef3636a6c5"
 KOKORO_VOICES_SHA="bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d"
@@ -93,6 +96,8 @@ models() {
   fi
   fetch "$KOKORO_BASE/kokoro-v1.0.onnx" "$MODELS/kokoro/kokoro-v1.0.onnx" "$KOKORO_ONNX_SHA"
   fetch "$KOKORO_BASE/voices-v1.0.bin" "$MODELS/kokoro/voices-v1.0.bin" "$KOKORO_VOICES_SHA"
+  # speaker check (#32): only the enrolled owner's voice is heard (backend/voiceprint.py SPEAKER_MODEL)
+  fetch "$SPEAKER_URL/$SPEAKER_MODEL" "$MODELS/$SPEAKER_MODEL" "$SPEAKER_SHA"
 }
 
 # cfgval <key>: value from config.toml, else config.example.toml; never fails (no pipefail abort on a missing file)
@@ -265,7 +270,10 @@ if [ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ]; then
     for _ in 1 2 3 4 5 6 7 8 9 10; do pgrep -f "electron/dist/electron.*$REPO/frontend" >/dev/null || break; sleep 0.5; done
     setsid -f "$LAUNCHER" >/dev/null 2>&1
   fi
-  say "Done. Say \"Hey ${name:-Nova}\"."
+  say "Done. Say \"${name:-Nova}\"."
 else
-  say "Done. Start the orb with $LAUNCHER (it starts by itself from your next login), then say \"Hey ${name:-Nova}\"."
+  say "Done. Start the orb with $LAUNCHER (it starts by itself from your next login), then say \"${name:-Nova}\"."
+fi
+if [ "$(cfgval engine)" = parakeet ]; then  # the voice check needs Parakeet (#32)
+  say "To make only your voice wake it (one minute, with the orb open): cd $REPO/backend && uv run enroll.py"
 fi

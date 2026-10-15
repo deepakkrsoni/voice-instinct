@@ -159,3 +159,111 @@ def test_hiding_the_orb_by_hand_puts_it_to_sleep_even_with_a_question_open():
 
     users, _, sent, wake = asyncio.run(converse(["what's on today"], hold=lambda: True, before=shown_then_hidden))
     assert users == [] and {"type": "sleep"} in sent and not wake.awake
+
+
+from pipecat.utils.asyncio.task_manager import TaskManager
+from wake import make_dismiss
+
+
+async def _ready_wake():
+    """A wake strategy set up outside a pipeline, awake as if the orb was shown."""
+    async def send(m):
+        pass
+    tm = TaskManager(loop=asyncio.get_running_loop())
+    w = make_wake(["hey milo"], 30, send)
+    await w.setup(SimpleNamespace(task_manager=tm))
+    w.wake("shown")
+    return w
+
+
+def test_dismiss_sleeps_after_the_goodbye_and_a_later_reply_wakes_it():
+    async def go():
+        w = await _ready_wake()
+        results = []
+
+        async def cb(result, *, properties=None):
+            results.append(properties)
+        await make_dismiss(w)(SimpleNamespace(result_callback=cb))
+        assert results[0].run_llm is False  # no second response that would wake the orb again
+        w.wake("reply")  # the goodbye line starting
+        assert w.awake  # awake until it finishes
+        w.assistant_turn_done()
+        assert not w.awake
+        w.wake("reply")  # an errand's result after the goodbye: show the orb again
+        assert w.awake
+        await w.cleanup()
+    asyncio.run(go())
+
+
+def test_dismiss_without_a_goodbye_sleeps_after_grace():
+    async def go():
+        w = await _ready_wake()
+        w.dismiss(grace=0.1)
+        await asyncio.sleep(0.2)
+        assert not w.awake
+        await w.cleanup()
+    asyncio.run(go())
+
+
+def test_assistant_turn_done_keeps_awake_when_not_dismissing():
+    async def go():
+        w = await _ready_wake()
+        w.assistant_turn_done()
+        assert w.awake
+        await w.cleanup()
+    asyncio.run(go())
+
+
+def test_learned_phrases_wake_it_once_added():
+    users, _, sent, _ = asyncio.run(converse(["Hey Mailo, hello"], early=lambda w: w.add_phrases(["hey mailo"])))
+    assert users == ["Hey Mailo, hello"] and sent[0] == {"type": "wake", "reason": "phrase"}
+
+
+def test_would_wake_only_while_asleep_and_only_with_the_phrase():
+    async def go():
+        async def send(m):
+            pass
+        w = make_wake(["hey nova"], 30, send)
+        await w.setup(SimpleNamespace(task_manager=TaskManager(loop=asyncio.get_running_loop())))
+        asleep = (w.would_wake("Hey, Nova! What's on?"), w.would_wake("what's on today"))
+        w.wake("shown")
+        awake = w.would_wake("Hey Nova")
+        await w.cleanup()
+        return asleep, awake
+    assert asyncio.run(go()) == ((True, False), False)
+
+
+def test_would_wake_sees_a_wake_phrase_split_across_segments():
+    # A guest says "Okay." ... "Milo, read my email": Pipecat's gate joins the two, so the check must too.
+    async def go():
+        async def send(m):
+            pass
+        w = make_wake(["okay nova"], 30, send)
+        await w.setup(SimpleNamespace(task_manager=TaskManager(loop=asyncio.get_running_loop())))
+        w._check_wake_phrase("Okay.")  # what the gate does with the first segment while asleep
+        split = w.would_wake("Nova, read my email")
+        await w.cleanup()
+        return split
+    assert asyncio.run(go()) is True
+
+
+def test_removed_phrases_no_longer_wake_it():
+    async def go():
+        async def send(m):
+            pass
+        w = make_wake(["hey nova"], 30, send)
+        await w.setup(SimpleNamespace(task_manager=TaskManager(loop=asyncio.get_running_loop())))
+        w.add_phrases(["nova", "inova"])
+        added = w.would_wake("bossa nova")
+        w.remove_phrases(["nova", "inova"])
+        removed = (w.would_wake("bossa nova"), w.would_wake("Hey Nova"))
+        await w.cleanup()
+        return added, removed
+    assert asyncio.run(go()) == (True, (False, True))  # the configured phrase still works
+
+
+def test_the_name_anywhere_wakes_it():
+    from config import Config
+    users, _, sent, _ = asyncio.run(converse(["could you, Nova, check the weather"],
+                                             early=lambda w: w.add_phrases(Config().wake_phrases)))
+    assert sent and sent[0] == {"type": "wake", "reason": "phrase"}

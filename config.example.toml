@@ -1,7 +1,7 @@
 # voice-instinct settings. Copy to config.toml (the installer does this) and edit.
 
 [assistant]
-name = "Nova"                 # you wake it with "Hey Nova" or "Okay Nova"
+name = "Nova"                 # say the name to wake it: "Nova, what's on today?"
 awake_timeout = 10            # seconds of quiet before the orb hides
 
 [model]
@@ -36,3 +36,8 @@ browser_steps = false
 # it downloads only the engine chosen here (about 450 MB). Nemotron's weights are under the NVIDIA
 # Open Model License.
 engine = "nemotron"
+
+[voice]
+# Only your voice wakes it, after `cd backend && uv run enroll.py` (needs engine = "parakeet"). Lower this
+# if it misses you, raise it if others get through.
+# threshold = 0.6

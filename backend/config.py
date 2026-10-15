@@ -19,6 +19,7 @@ _SECTIONS = {
               "permission_timeout": "permission_timeout"},
     "debug": {"browser_steps": "debug_browser_steps"},
     "stt": {"engine": "stt_engine"},
+    "voice": {"threshold": "voice_threshold"},
 }
 
 
@@ -41,13 +42,16 @@ class Config:
     permission_mode: str = "auto"  # Claude Code mode for delegated runs; the sandbox bounds what auto may do
     debug_browser_steps: bool = False  # screenshot every errand browser step (steps.py)
     stt_engine: str = "nemotron"  # speech-to-text engine (services.make_stt); install.sh downloads only this one
+    voice_threshold: float = 0.6  # owner-voice cut-off (voiceprint.py); spike 2 (#32): EER 0 to 5% at 0.60
 
     @property
     def wake_phrases(self) -> list[str]:
-        words = " ".join(self.name.lower().split())
-        # STT writes both "okay" and "OK"; Nemotron writes "Hey" as "Hay"
-        return [f"hey {words}", f"okay {words}", f"ok {words}", f"hay {words}"]
-
+        """The name itself, wherever it is said ("Nova, what's on?", "hey nova"), plus the merged forms speech-to-text
+        writes for a quick "Hey Nova" ("Inova", "Anova"). Measured 2026-10-16: Parakeet and Deepgram both heard the
+        owner's "Hey Nova" as "hang over" or "Inova", while "Nova" alone came out right (#32)."""
+        words = self.name.lower().split()
+        merged = [" ".join([p + words[0], *words[1:]]) for p in ("i", "in", "a", "e", "ha", "he", "hey", "o")]
+        return [" ".join(words), *merged]
 
 def load(path=None) -> Config:
     p = Path(path) if path else REPO_ROOT / "config.toml"
@@ -76,4 +80,7 @@ def load(path=None) -> Config:
         raise ValueError("config.toml: [debug] browser_steps must be true or false")
     if cfg.stt_engine not in STT_ENGINES:
         raise ValueError(f"config.toml: [stt] engine must be one of {', '.join(STT_ENGINES)}")
+    t = cfg.voice_threshold
+    if isinstance(t, bool) or not isinstance(t, (int, float)) or not 0 <= t <= 1:
+        raise ValueError("config.toml: [voice] threshold must be a number from 0 to 1")
     return cfg

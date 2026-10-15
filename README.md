@@ -8,7 +8,7 @@ Not affiliated with Instinct.
 
 ## What it does
 
-- It lives in the background. Say "Hey Nova" (configurable) and a floating orb appears, listens, thinks
+- It lives in the background. Say "Nova" (the name is configurable) and a floating orb appears, listens, thinks
   and speaks, then hides again.
 - You just talk to it. Speech-to-text (Nemotron streaming, or Parakeet) and text-to-speech (Kokoro) run locally,
   around a model of your choice: Gemini by default, or any OpenAI-compatible endpoint or Ollama.
@@ -53,6 +53,12 @@ Built on [Pipecat](https://docs.pipecat.ai).
 - Speech recognition and synthesis run locally, and sessions and questions are logged only on your
   machine in `~/.voice-instinct/`, readable only by you. The models you choose see the conversation
   and the task (Gemini and Claude are cloud services); use Ollama for a local front model.
+- Only your voice wakes it, once you enrol: with the orb open, run `cd backend && uv run enroll.py` and
+  read five lines to the orb (one minute). It works at once. As with Siri, the voice check is on the wake
+  phrase: other people saying "Nova" are ignored, and once you've woken it, it listens to the conversation
+  until it sleeps. The voiceprint stays in `~/.voice-instinct/`, and `uv run enroll.py --delete` removes it.
+  If it misses you, lower `[voice] threshold` in `config.toml` (default 0.6); if others get through, raise
+  it. It needs the Parakeet engine. Say "stop" to send it away; running errands carry on.
 
 Using a subscription CLI this way depends on the vendor's terms; check them before relying on it.
 

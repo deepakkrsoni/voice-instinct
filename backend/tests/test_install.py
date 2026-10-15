@@ -18,18 +18,20 @@ def run(tmp_path, os_id, *args):
     return subprocess.run(["bash", str(SCRIPT), *args], capture_output=True, text=True, env=env), home
 
 
-def clean_repo(tmp_path):
-    """Temp copy of just what install.sh needs: no config.toml, no .env."""
+def clean_repo(tmp_path, config=None):
+    """Temp copy of just what install.sh needs: no config.toml (unless given), no .env."""
     repo = tmp_path / "repo"
     (repo / "backend").mkdir(parents=True)
     (repo / "frontend").mkdir()
     shutil.copy(SCRIPT, repo / "install.sh")
     shutil.copy(REPO / "config.example.toml", repo / "config.example.toml")
+    if config is not None:
+        (repo / "config.toml").write_text(config)
     return repo
 
 
-def run_clean(tmp_path, *args, extra_env=None):
-    repo = clean_repo(tmp_path)
+def run_clean(tmp_path, *args, extra_env=None, config=None):
+    repo = clean_repo(tmp_path, config)
     rel = tmp_path / "os-release"
     rel.write_text('ID=arch\nNAME="arch"\n')
     home = tmp_path / "home"
@@ -42,8 +44,16 @@ def test_clean_checkout_dry_run_finishes(tmp_path):
     r, _ = run_clean(tmp_path, "--dry-run")
     assert r.returncode == 0, r.stderr
     assert "create config.toml from config.example.toml" in r.stdout
-    assert 'Done. Say "Hey Nova"' in r.stdout
+    assert 'Done. Say "Nova"' in r.stdout
     assert "systemctl --user restart voice-instinct.service" in r.stdout  # update re-run restarts the backend
+    assert "nemo_en_titanet_small.onnx" in r.stdout  # speaker model (#32)
+    assert "uv run enroll.py" not in r.stdout  # the default engine (Nemotron) has no voice check
+
+
+def test_the_enrol_hint_is_shown_with_parakeet(tmp_path):
+    r, _ = run_clean(tmp_path, "--dry-run", config='[stt]\nengine = "parakeet"\n')
+    assert r.returncode == 0, r.stderr
+    assert "uv run enroll.py" in r.stdout
 
 
 def test_uv_resolved_from_local_bin_after_install(tmp_path):
