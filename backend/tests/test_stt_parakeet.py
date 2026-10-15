@@ -3,6 +3,9 @@ PAUSE_SECS of silence, so short pauses between words no longer split a sentence 
 
 import asyncio
 
+import numpy as np
+import pytest
+
 from pipecat.frames.frames import InputAudioRawFrame, TranscriptionFrame, VADUserStartedSpeakingFrame, VADUserStoppedSpeakingFrame
 from pipecat.tests.utils import SleepFrame, run_test
 from services import ParakeetSTTService
@@ -163,3 +166,34 @@ def test_while_enrolling_segments_go_to_the_enrolment_and_not_downstream():
     down, _ = asyncio.run(run_test(stt, frames_to_send=[
         VADUserStartedSpeakingFrame(), *speech(), VADUserStoppedSpeakingFrame(), SleepFrame(sleep=0.3)]))
     assert enrol.takes == ["heard"] and not [f for f in down if isinstance(f, TranscriptionFrame)]
+
+
+class PeakRec(FakeOffline):
+    """Records the peak of what the recognizer is given."""
+
+    def __init__(self):
+        super().__init__()
+        self.peaks = []
+
+    def create_stream(self):
+        rec = self
+
+        class S:
+            result = type("R", (), {"text": "heard"})()
+
+            def accept_waveform(self, sample_rate, samples):
+                rec.peaks.append(float(np.abs(samples).max()))
+        return S()
+
+
+def test_quiet_speech_is_made_louder_before_parakeet_reads_it():
+    # A short "Hey Nova" at peak 0.3 came out as nothing or "Inova"; normalised it was heard (#32).
+    rec = PeakRec()
+    ParakeetSTTService(recognizer=rec)._decode((np.full(16000, 0.3) * 32767).astype(np.int16).tobytes())
+    assert rec.peaks[0] == pytest.approx(0.9, abs=0.01)
+
+
+def test_near_silence_is_not_blown_up_into_noise():
+    rec = PeakRec()
+    ParakeetSTTService(recognizer=rec)._decode((np.full(16000, 0.01) * 32767).astype(np.int16).tobytes())
+    assert rec.peaks[0] <= 0.05  # gain is capped

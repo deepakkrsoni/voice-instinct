@@ -147,8 +147,15 @@ class ParakeetSTTService(SegmentedSTTService):
         await self._cancel_cut()
         await super().stop(frame)
 
+    # A short "Hey Nova" peaking at 0.3 came out as nothing or "Inova"; normalised, Parakeet heard it (#32).
+    PEAK = 0.9
+    MAX_GAIN = 4.0  # near silence stays near silence
+
     def _decode(self, pcm: bytes) -> str:
         audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
+        peak = float(np.abs(audio).max()) if len(audio) else 0.0
+        if peak > 0:
+            audio = audio * min(self.PEAK / peak, self.MAX_GAIN)
         stream = self._rec.create_stream()
         stream.accept_waveform(16000, audio)
         self._rec.decode_stream(stream)

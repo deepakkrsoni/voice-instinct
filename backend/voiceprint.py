@@ -175,6 +175,13 @@ def learn_spellings(transcripts, name: str) -> list[str]:
     return out
 
 
+def owner_wake_phrases(name: str) -> list[str]:
+    """Once enrolled, the name alone and the merged forms Parakeet writes for a quick "Hey Nova" ("Inova",
+    "E nova"): only the owner's voice can wake it, so a looser match is safe (#32)."""
+    words = name.lower().split()
+    return [" ".join(words)] + [" ".join([p + words[0], *words[1:]]) for p in ("i", "a", "e", "ha", "he", "hey", "o")]
+
+
 def learned_wake_phrases(cfg) -> list[str]:
     path = learned_path(cfg)
     if not path.exists():
