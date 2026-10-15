@@ -9,6 +9,9 @@ const BACKEND = "http://127.0.0.1:7860"; // the page's CSP allows only this back
 const ORB_ORIGIN = "http://orb.invalid"; // same as backend/guard.py
 const DEFAULTS = { name: "Nova", size: 128, position: "top-right" }; // same as backend/config.py
 app.setName("voice-instinct"); // Wayland app_id / X11 class, used by compositor window rules
+// Chromium's WebRTC gain control turns the system mic level down by itself (100% drifted to 82%, and the
+// user had to shout to wake it). The user's mic setting is left as they set it.
+app.commandLine.appendSwitch("disable-features", "WebRtcAllowInputVolumeAdjustment");
 
 // One request only: each one forwards our argv to the running instance ("second-instance").
 if (!app.requestSingleInstanceLock() || process.argv.includes("--quit")) {
