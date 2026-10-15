@@ -117,7 +117,7 @@ class FakePrint:
     def __init__(self, owner):
         self.owner, self.checked = owner, 0
 
-    def is_owner(self, pcm, rate=16000):
+    def is_owner(self, pcm):
         self.checked += 1
         return self.owner
 
@@ -139,3 +139,22 @@ def test_the_owners_segment_is_transcribed():
 def test_someone_elses_segment_is_never_decoded_or_sent():
     segments, checked, finals = run_checked(False)
     assert checked == 1 and segments == [] and finals == []
+
+
+class FakeEnrolment:
+    active = True
+
+    def __init__(self):
+        self.takes = []
+
+    def offer(self, pcm, text):
+        self.takes.append(text)
+
+
+def test_while_enrolling_segments_go_to_the_enrolment_and_not_downstream():
+    rec, enrol = FakeOffline(), FakeEnrolment()
+    stt = ParakeetSTTService(recognizer=rec, voiceprint=FakePrint(False), enrolment=enrol)
+    stt.PAUSE_SECS = 0.05
+    down, _ = asyncio.run(run_test(stt, frames_to_send=[
+        VADUserStartedSpeakingFrame(), *speech(), VADUserStoppedSpeakingFrame(), SleepFrame(sleep=0.3)]))
+    assert enrol.takes == ["heard"] and not [f for f in down if isinstance(f, TranscriptionFrame)]
