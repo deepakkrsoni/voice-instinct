@@ -55,7 +55,7 @@ Built on [Pipecat](https://docs.pipecat.ai).
   and the task (Gemini and Claude are cloud services); use Ollama for a local front model.
 - Only your voice wakes it, once you enrol: with the orb open, run `cd backend && uv run enroll.py` and
   read five lines to the orb (one minute). It works at once. As with Siri, the voice check is on the wake
-  phrase: other people's "Hey Milo" is ignored, and once you've woken it, it listens to the conversation
+  phrase: other people's "Hey Nova" is ignored, and once you've woken it, it listens to the conversation
   until it sleeps. The voiceprint stays in `~/.voice-instinct/`, and `uv run enroll.py --delete` removes it.
   If it misses you, lower `[voice] threshold` in `config.toml` (default 0.6); if others get through, raise
   it. It needs the Parakeet engine. Say "stop" to send it away; running errands carry on.

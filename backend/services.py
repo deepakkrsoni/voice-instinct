@@ -85,7 +85,7 @@ class ParakeetSTTService(SegmentedSTTService):
         )
         self._rec = recognizer or _load_recognizer(model_dir)
         self._cut = None
-        self._voiceprint = voiceprint  # #32: only the owner's wake phrase wakes Milo
+        self._voiceprint = voiceprint  # #32: only the owner's wake phrase wakes the assistant
         self._needs_check = needs_check  # text -> bool: asleep and a wake phrase (ProgrammaticWake.would_wake)
         self._enrolment = enrolment  # #32: while enrolling, segments are takes (enrolment.py)
 
@@ -162,7 +162,7 @@ class ParakeetSTTService(SegmentedSTTService):
         return stream.result.text.strip()
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
-        if self._enrolment is not None and self._enrolment.active:  # #32: a take, not something said to Milo
+        if self._enrolment is not None and self._enrolment.active:  # #32: a take, not something said to the assistant
             text = await asyncio.to_thread(self._decode, audio)
             await asyncio.to_thread(self._enrolment.offer, audio, text)
             return

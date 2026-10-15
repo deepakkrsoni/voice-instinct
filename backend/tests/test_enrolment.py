@@ -91,3 +91,13 @@ def test_start_without_the_speaker_model_says_run_install(tmp_path):
     app.include_router(make_enrol_router(e, "tok"))
     r = TestClient(app).post("/enrol/start", headers={"X-Voice-Token": "tok"})
     assert r.status_code == 503 and "install.sh" in r.json()["detail"] and not e.active
+
+
+def test_delete_tells_the_bot_which_phrases_to_drop(tmp_path):
+    dropped = []
+    vp = Voiceprint(None, None, 0.6, lambda x: np.array([1.0, 0.0, 1.0]) / 2 ** 0.5)
+    e = Enrolment(Config(data_dir=str(tmp_path), name="Milo"), vp, embed=vp.embed, cohort=lambda: MU,
+                  on_deleted=dropped.append)
+    learned_path(e.cfg).write_text('["hey mailo"]')
+    e.delete()
+    assert dropped == [["hey mailo"]]  # read before the file is removed

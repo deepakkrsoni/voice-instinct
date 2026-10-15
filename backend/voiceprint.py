@@ -1,5 +1,5 @@
-"""The owner's voice (#32): a TitaNet-small speaker embedding, made by enrolling through Milo itself
-(enrolment.py) and checked on the wake phrase while Milo sleeps, as Siri does. No voiceprint
+"""The owner's voice (#32): a TitaNet-small speaker embedding, made by enrolling through the assistant itself
+(enrolment.py) and checked on the wake phrase while it sleeps, as Siri does. No voiceprint
 file means the check is off.
 
 Spike 2 (orb audio, 26 owner lines, 25 phone segments): EER 0 to 5%, cut-off 0.60. Speech only, because a
@@ -113,7 +113,7 @@ class Voiceprint:
         if embed is None and model.exists():
             embed = embed_with(model)
         if not path.exists():
-            logger.info("voice check off: run `uv run enroll.py` so only your voice is heard")
+            logger.info("voice check off: run `uv run enroll.py` so only your voice can wake it")
             return cls(None, None, cfg.voice_threshold, embed)
         try:
             data = dict(np.load(path))

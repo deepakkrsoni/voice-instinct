@@ -245,3 +245,18 @@ def test_would_wake_sees_a_wake_phrase_split_across_segments():
         await w.cleanup()
         return split
     assert asyncio.run(go()) is True
+
+
+def test_removed_phrases_no_longer_wake_it():
+    async def go():
+        async def send(m):
+            pass
+        w = make_wake(["hey nova"], 30, send)
+        await w.setup(SimpleNamespace(task_manager=TaskManager(loop=asyncio.get_running_loop())))
+        w.add_phrases(["nova", "inova"])
+        added = w.would_wake("bossa nova")
+        w.remove_phrases(["nova", "inova"])
+        removed = (w.would_wake("bossa nova"), w.would_wake("Hey Nova"))
+        await w.cleanup()
+        return added, removed
+    assert asyncio.run(go()) == (True, (False, True))  # the configured phrase still works

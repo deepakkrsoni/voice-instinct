@@ -1,6 +1,6 @@
-"""Make Milo answer only your voice (#32): read five lines to the orb, about a minute. Milo records them
+"""Make only your voice wake the assistant (#32): read five lines to the orb, about a minute. It records them
 itself, so the voiceprint matches what it hears; it is used straight away and never leaves this computer.
-Run: uv run enroll.py   Remove it: uv run enroll.py --delete   (Milo must be running.)"""
+Run: uv run enroll.py   Remove it: uv run enroll.py --delete   (The assistant must be running.)"""
 
 import json
 import sys
@@ -40,16 +40,16 @@ def run(cfg, call, say=print, sleep=time.sleep, delete=False) -> int:
     if delete:
         r = call("POST", "/enrol/delete")
         if r is None:
-            say("Start Milo first (systemctl --user start voice-instinct.service).")
+            say(f"Start {cfg.name} first (systemctl --user start voice-instinct.service).")
             return 1
         if r.get("error"):
             say(f"Can't delete: {r['error']}")
             return 1
-        say(f"Voiceprint deleted: {cfg.name} hears every voice again.")
+        say(f"Voiceprint deleted: any voice can wake {cfg.name} again.")
         return 0
     started = call("POST", "/enrol/start")
     if started is None:
-        say("Start Milo first (systemctl --user start voice-instinct.service), with the orb open.")
+        say(f"Start {cfg.name} first (systemctl --user start voice-instinct.service), with the orb open.")
         return 1
     if started.get("error"):
         say(f"Can't enrol: {started['error']}")

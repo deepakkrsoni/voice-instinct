@@ -71,6 +71,9 @@ WAKES = set()  # open sessions' wake strategies, told about spellings learned at
 ENROLMENT = Enrolment(cfg, VOICEPRINT, embed=VOICEPRINT.embed,
                       cohort=lambda: cohort_mean(VOICEPRINT.embed, kokoro_paths(cfg)),
                       on_learned=lambda phrases: [w.add_phrases(phrases + owner_wake_phrases(cfg.name))
+                                                  for w in list(WAKES)],
+                      # the name alone is only safe while the voiceprint guards it
+                      on_deleted=lambda learned: [w.remove_phrases(learned + owner_wake_phrases(cfg.name))
                                                   for w in list(WAKES)])
 # Debug mode (config [debug] browser_steps): every errand browser step screenshotted (steps.py).
 STEPS = StepHub(Path.home(), telegram=Telegram.from_env()) if cfg.debug_browser_steps else None
@@ -79,7 +82,7 @@ STEPS = StepHub(Path.home(), telegram=Telegram.from_env()) if cfg.debug_browser_
 BUDGET = TimeBudget(min_notice=cfg.permission_timeout + 30)  # errands are told when nearly out of time
 app.include_router(make_router(bridge, HOOK_TOKEN, steps=STEPS, budget=BUDGET))
 app.include_router(make_gui_router(cfg))
-app.include_router(make_enrol_router(ENROLMENT, HOOK_TOKEN))  # enroll.py: owner enrolment through Milo (#32)
+app.include_router(make_enrol_router(ENROLMENT, HOOK_TOKEN))  # enroll.py: owner enrolment through the assistant (#32)
 refuse_other_origins(app, port=7860)  # no other web page may open a voice session (guard.py)
 logging.getLogger("uvicorn.access").addFilter(hide_hook_tokens)  # the token is in the URL
 logging.getLogger("phonemizer").setLevel(logging.ERROR)  # Kokoro's espeak warns on every number; noise

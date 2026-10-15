@@ -1,6 +1,6 @@
-"""Enrolment through Milo (#32): the voiceprint must come from the audio the check will see (the orb's,
+"""Enrolment through the assistant (#32): the voiceprint must come from the audio the check will see (the orb's,
 noise suppressed), so the running bot records it. enroll.py drives these routes; while active, Parakeet hands
-every segment here instead of to the pipeline, so Milo doesn't react to the lines."""
+every segment here instead of to the pipeline, so the assistant doesn't react to the lines."""
 
 import hmac
 import json
@@ -11,18 +11,18 @@ from fastapi import APIRouter, Header, HTTPException
 from loguru import logger
 
 from voiceprint import (MIN_SPEECH_SECS, build_vector, delete_voiceprint, learn_spellings, learned_path,
-                        save_voiceprint, speech_only)
+                        learned_wake_phrases, save_voiceprint, speech_only)
 
 # All start with the wake phrase, as Siri's setup does: the check judges only the wake phrase (#32).
 LINES = ["Hey {name}", "Hey {name}", "Hey {name}", "Hey {name}, what's the weather tomorrow?",
          "Hey {name}, remind me to call mom at six."]
-EXPIRE_SECS = 60  # enroll.py killed mid-way: Milo hears normally again after this
+EXPIRE_SECS = 60  # enroll.py killed mid-way: the assistant hears normally again after this
 
 
 class Enrolment:
-    def __init__(self, cfg, voiceprint, embed, cohort, on_learned=None, clock=time.monotonic):
+    def __init__(self, cfg, voiceprint, embed, cohort, on_learned=None, on_deleted=None, clock=time.monotonic):
         self.cfg, self._vp, self._embed, self._cohort = cfg, voiceprint, embed, cohort
-        self.on_learned, self._clock = on_learned, clock
+        self.on_learned, self.on_deleted, self._clock = on_learned, on_deleted, clock
         self._lock = threading.Lock()  # offer() runs in the STT's worker thread
         self._takes, self._since, self._done, self._learned, self._error = None, 0.0, False, [], None
         self._finishing = False  # all takes in, the voiceprint being built
@@ -61,7 +61,7 @@ class Enrolment:
             takes, self._takes, self._finishing = self._takes, None, True
         try:
             self._finish(takes)
-        except Exception as e:  # never into the STT: Milo keeps working, enroll.py reports it
+        except Exception as e:  # never into the STT: the assistant keeps working, enroll.py reports it
             logger.exception("enrolment failed")
             with self._lock:
                 self._error = str(e) or type(e).__name__
@@ -91,9 +91,12 @@ class Enrolment:
 
     def delete(self):
         self.cancel()
+        learned = learned_wake_phrases(self.cfg)  # before the file goes: open sessions must drop them too
         delete_voiceprint(self.cfg)
         self._vp.clear()
-        logger.info("voiceprint deleted: every voice is heard")
+        if self.on_deleted:
+            self.on_deleted(learned)
+        logger.info("voiceprint deleted: any voice can wake it again")
 
 
 def make_enrol_router(enrolment: Enrolment, token: str) -> APIRouter:
