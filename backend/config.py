@@ -19,6 +19,7 @@ _SECTIONS = {
               "permission_timeout": "permission_timeout"},
     "debug": {"browser_steps": "debug_browser_steps"},
     "stt": {"engine": "stt_engine"},
+    "voice": {"threshold": "voice_threshold"},
 }
 
 
@@ -41,6 +42,7 @@ class Config:
     permission_mode: str = "auto"  # Claude Code mode for delegated runs; the sandbox bounds what auto may do
     debug_browser_steps: bool = False  # screenshot every errand browser step (steps.py)
     stt_engine: str = "nemotron"  # speech-to-text engine (services.make_stt); install.sh downloads only this one
+    voice_threshold: float = 0.35  # owner-voice cut-off (voiceprint.py); spike #32: owner >= 0.46, others <= 0.18
 
     @property
     def wake_phrases(self) -> list[str]:
@@ -76,4 +78,7 @@ def load(path=None) -> Config:
         raise ValueError("config.toml: [debug] browser_steps must be true or false")
     if cfg.stt_engine not in STT_ENGINES:
         raise ValueError(f"config.toml: [stt] engine must be one of {', '.join(STT_ENGINES)}")
+    t = cfg.voice_threshold
+    if isinstance(t, bool) or not isinstance(t, (int, float)) or not 0 <= t <= 1:
+        raise ValueError("config.toml: [voice] threshold must be a number from 0 to 1")
     return cfg

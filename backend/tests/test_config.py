@@ -144,3 +144,15 @@ def test_an_unknown_stt_engine_is_refused_with_the_choices(tmp_path):
 def test_hay_spelled_the_way_nemotron_writes_hey_also_wakes_it():
     # Probed 2026-10-14: Nemotron streaming transcribes Kokoro's "Hey Nova" as "Hay Nova".
     assert "hay nova" in Config().wake_phrases
+
+
+def test_voice_threshold_defaults_and_is_validated(tmp_path):
+    p = tmp_path / "config.toml"
+    p.write_text("")
+    assert load(p).voice_threshold == 0.35
+    p.write_text("[voice]\nthreshold = 0.5\n")
+    assert load(p).voice_threshold == 0.5
+    for bad in ("1.5", "-0.1", "true", '"high"'):
+        p.write_text(f"[voice]\nthreshold = {bad}\n")
+        with pytest.raises(ValueError, match="threshold"):
+            load(p)
