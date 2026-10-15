@@ -57,3 +57,26 @@ def test_a_failure_in_the_bot_is_reported_at_once():
         return {**st, "done": False, "error": "kokoro broke"} if st and st["heard"] >= len(LINES) else st
     assert run(cfg(), call, say=said.append, sleep=lambda s: None) == 1
     assert any("kokoro broke" in s for s in said)
+
+
+def test_the_bots_reason_is_shown_when_it_cannot_enrol():
+    said = []
+    assert run(cfg(), lambda m, p: {"error": "run ./install.sh"}, say=said.append, sleep=lambda s: None) == 1
+    assert any("install.sh" in s for s in said)
+
+
+def test_http_call_turns_a_503_into_its_reason(monkeypatch):
+    import io
+    import urllib.error
+    import enroll
+
+    def fail(req, timeout):
+        raise urllib.error.HTTPError(req.full_url, 503, "x", {}, io.BytesIO(b'{"detail": "run ./install.sh"}'))
+    monkeypatch.setattr(enroll.urllib.request, "urlopen", fail)
+    assert enroll.http_call("t")("POST", "/enrol/start") == {"error": "run ./install.sh"}
+
+
+def test_delete_reports_a_refusal_instead_of_success():
+    said = []
+    assert run(cfg(), lambda m, p: {"error": "Forbidden"}, say=said.append, sleep=lambda s: None, delete=True) == 1
+    assert not any("deleted" in s for s in said)

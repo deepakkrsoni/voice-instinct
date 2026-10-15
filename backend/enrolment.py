@@ -27,6 +27,10 @@ class Enrolment:
         self._takes, self._since, self._done, self._learned, self._error = None, 0.0, False, [], None
 
     @property
+    def ready(self) -> bool:
+        return self._embed is not None
+
+    @property
     def active(self) -> bool:
         with self._lock:
             if self._takes is not None and self._clock() - self._since > EXPIRE_SECS:
@@ -97,6 +101,8 @@ def make_enrol_router(enrolment: Enrolment, token: str) -> APIRouter:
     @router.post("/enrol/start")
     async def start(x_voice_token: str | None = Header(None)):
         check(x_voice_token)
+        if not enrolment.ready:
+            raise HTTPException(503, "The speaker model is not installed: run ./install.sh")
         enrolment.start()
         return enrolment.status()
 

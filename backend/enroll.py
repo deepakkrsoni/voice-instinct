@@ -5,6 +5,7 @@ Run: uv run enroll.py   Remove it: uv run enroll.py --delete   (Milo must be run
 import json
 import sys
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -22,6 +23,11 @@ def http_call(token):
         try:
             with urllib.request.urlopen(req, timeout=5) as r:
                 return json.loads(r.read())
+        except urllib.error.HTTPError as e:  # the bot is up but refuses, with a reason
+            try:
+                return {"error": json.loads(e.read()).get("detail") or str(e)}
+            except ValueError:
+                return {"error": str(e)}
         except OSError:
             return None
     return call
@@ -32,13 +38,21 @@ def run(cfg, call, say=print, sleep=time.sleep, delete=False) -> int:
         say('The voice check needs [stt] engine = "parakeet" in config.toml.')
         return 1
     if delete:
-        if call("POST", "/enrol/delete") is None:
+        r = call("POST", "/enrol/delete")
+        if r is None:
             say("Start Milo first (systemctl --user start voice-instinct.service).")
+            return 1
+        if r.get("error"):
+            say(f"Can't delete: {r['error']}")
             return 1
         say(f"Voiceprint deleted: {cfg.name} hears every voice again.")
         return 0
-    if call("POST", "/enrol/start") is None:
+    started = call("POST", "/enrol/start")
+    if started is None:
         say("Start Milo first (systemctl --user start voice-instinct.service), with the orb open.")
+        return 1
+    if started.get("error"):
+        say(f"Can't enrol: {started['error']}")
         return 1
     say(f"Read each line to the orb, where you normally use {cfg.name}. It stays quiet while you do.")
     heard = 0

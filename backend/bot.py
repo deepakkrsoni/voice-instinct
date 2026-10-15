@@ -29,8 +29,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMUserAggregatorParams,
 )
 from pipecat.runner.run import app
-from pipecat.turns.user_start import TranscriptionUserTurnStartStrategy
-from pipecat.turns.user_turn_strategies import UserTurnStrategies
+from pipecat.turns.user_turn_strategies import UserTurnStrategies, default_user_turn_start_strategies
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.kokoro.tts import KokoroTTSService
@@ -43,7 +42,8 @@ from services import build_llm, kokoro_paths, make_stt
 from shutdown import cancel_on_exit
 from steps import StepHub
 from telegram import Telegram
-from voiceprint import OwnerVADUserTurnStartStrategy, Voiceprint, learned_wake_phrases
+from enrolment import Enrolment, make_enrol_router
+from voiceprint import Voiceprint, cohort_mean, learned_wake_phrases
 from wake import handle_client_message, make_dismiss, make_wake
 
 load_dotenv(REPO_ROOT / ".env")
@@ -59,7 +59,7 @@ cfg = load()
 VOICEPRINT = Voiceprint.load(cfg)  # #32: no file means everyone is heard, as before enrolment
 if VOICEPRINT.enrolled and cfg.stt_engine != "parakeet":  # Nemotron streams, with no segment to check
     logger.warning('voice check off: it needs [stt] engine = "parakeet"')
-    VOICEPRINT = Voiceprint(None, cfg.voice_threshold)
+    VOICEPRINT = Voiceprint(None, None, cfg.voice_threshold)
 DATA = Path(cfg.data_dir).expanduser()
 registry = Registry(DATA / "harness.db")
 registry.expire_open()  # questions left open by a previous run can no longer be answered
@@ -67,6 +67,10 @@ sessions = set()  # open sessions' runners, cancelled when the server is stopped
 relay = Relay(registry)
 bridge = HookBridge(registry, relay, cfg.permission_timeout)
 HOOK_TOKEN = load_token(DATA / "hook-token")
+WAKES = set()  # open sessions' wake strategies, told about spellings learned at enrolment (#32)
+ENROLMENT = Enrolment(cfg, VOICEPRINT, embed=VOICEPRINT.embed,
+                      cohort=lambda: cohort_mean(VOICEPRINT.embed, kokoro_paths(cfg)),
+                      on_learned=lambda phrases: [w.add_phrases(phrases) for w in WAKES])
 # Debug mode (config [debug] browser_steps): every errand browser step screenshotted (steps.py).
 STEPS = StepHub(Path.home(), telegram=Telegram.from_env()) if cfg.debug_browser_steps else None
 # Documented extension point (Running Bots Locally > Adding your own routes): the runner exports
@@ -74,6 +78,7 @@ STEPS = StepHub(Path.home(), telegram=Telegram.from_env()) if cfg.debug_browser_
 BUDGET = TimeBudget(min_notice=cfg.permission_timeout + 30)  # errands are told when nearly out of time
 app.include_router(make_router(bridge, HOOK_TOKEN, steps=STEPS, budget=BUDGET))
 app.include_router(make_gui_router(cfg))
+app.include_router(make_enrol_router(ENROLMENT, HOOK_TOKEN))  # enroll.py: owner enrolment through Milo (#32)
 refuse_other_origins(app, port=7860)  # no other web page may open a voice session (guard.py)
 logging.getLogger("uvicorn.access").addFilter(hide_hook_tokens)  # the token is in the URL
 logging.getLogger("phonemizer").setLevel(logging.ERROR)  # Kokoro's espeak warns on every number; noise
@@ -125,7 +130,6 @@ async def bot(runner_args: RunnerArguments):
     _quiet_logs()
     transport = await create_transport(runner_args, transport_params)
 
-    stt = make_stt(cfg, voiceprint=VOICEPRINT)
     backend = ClaudeCodeBackend(cmd=os.environ.get("VI_CLAUDE", "claude"), cwd=cfg.backend_cwd,
                                 timeout=cfg.backend_timeout, permission_mode=cfg.permission_mode,
                                 hide_env=(cfg.api_key_env, "TELEGRAM_CHAT_ID"),  # the bot token goes as *_TOKEN
@@ -140,6 +144,9 @@ async def bot(runner_args: RunnerArguments):
 
     wake = make_wake(cfg.wake_phrases + learned_wake_phrases(cfg), cfg.awake_timeout, send_gui,
                      hold=lambda: relay.asking)
+    WAKES.add(wake)
+    # As Siri does: only a wake phrase said while asleep is voice-checked (#32)
+    stt = make_stt(cfg, voiceprint=VOICEPRINT, enrolment=ENROLMENT, needs_check=wake.would_wake)
 
     tools = [make_dismiss(wake)]  # "stop" works with or without Claude (#32)
     if backend.available():
@@ -170,10 +177,8 @@ async def bot(runner_args: RunnerArguments):
         # Defaults: Smart Turn v3 stop strategy (Speech Input & Turn Detection > Best Practices).
         user_params=LLMUserAggregatorParams(
             vad_analyzer=SileroVADAnalyzer(),
-            # Documented: a wake phrase gates every turn. Pipecat's VAD start is swapped for one that
-            # starts a turn (and so interrupts Milo) only on the owner's voice (#32).
-            user_turn_strategies=UserTurnStrategies(start=[
-                wake, OwnerVADUserTurnStartStrategy(VOICEPRINT), TranscriptionUserTurnStartStrategy()]),
+            # Documented: a wake phrase gates every turn; the defaults follow it.
+            user_turn_strategies=UserTurnStrategies(start=[wake, *default_user_turn_start_strategies()]),
         ),
         assistant_params=ASSISTANT_PARAMS,  # older turns are summarized, so it stays bounded
     )
@@ -246,6 +251,7 @@ async def bot(runner_args: RunnerArguments):
         await runner.run()
     finally:
         sessions.discard(runner)
+        WAKES.discard(wake)
 
 
 if __name__ == "__main__":

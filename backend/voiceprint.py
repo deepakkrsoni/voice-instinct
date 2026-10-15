@@ -94,6 +94,11 @@ class Voiceprint:
     def enrolled(self) -> bool:
         return self.vector is not None
 
+    @property
+    def embed(self):
+        """The embedder, or None when the speaker model isn't installed."""
+        return self._embed
+
     def set(self, vector, mean) -> None:
         self.vector, self.mean = vector, mean
 

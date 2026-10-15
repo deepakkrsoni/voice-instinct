@@ -36,3 +36,8 @@ browser_steps = false
 # it downloads only the engine chosen here (about 450 MB). Nemotron's weights are under the NVIDIA
 # Open Model License.
 engine = "nemotron"
+
+[voice]
+# Only your voice wakes it, after `cd backend && uv run enroll.py` (needs engine = "parakeet"). Lower this
+# if it misses you, raise it if others get through.
+# threshold = 0.6

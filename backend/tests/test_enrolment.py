@@ -83,3 +83,11 @@ def test_a_failure_building_the_voiceprint_is_logged_not_raised(tmp_path):
 
 def test_every_line_starts_with_the_wake_phrase():
     assert len(LINES) == 5 and all(line.startswith("Hey {name}") for line in LINES)
+
+
+def test_start_without_the_speaker_model_says_run_install(tmp_path):
+    e = Enrolment(Config(data_dir=str(tmp_path)), Voiceprint(None, None, 0.6, None), embed=None, cohort=lambda: MU)
+    app = FastAPI()
+    app.include_router(make_enrol_router(e, "tok"))
+    r = TestClient(app).post("/enrol/start", headers={"X-Voice-Token": "tok"})
+    assert r.status_code == 503 and "install.sh" in r.json()["detail"] and not e.active

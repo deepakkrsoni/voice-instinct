@@ -27,8 +27,8 @@ esac
 MODELS="$HOME_DIR/.voice-instinct/models"
 ASR_MODELS="https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models"
 SPEAKER_URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models"  # sic
-SPEAKER_MODEL="3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx"
-SPEAKER_SHA="357a834f702b80161e5b981182c038e18553c1f2ca752ed6cec2052365d4129b"
+SPEAKER_MODEL="nemo_en_titanet_small.onnx"
+SPEAKER_SHA="ad4a1802485d8b34c722d2a9d04249662f2ece5d28a7a039063ca22f515a789e"
 KOKORO_BASE="https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
 KOKORO_ONNX_SHA="7d5df8ecf7d4b1878015a32686053fd0eebe2bc377234608764cc0ef3636a6c5"
 KOKORO_VOICES_SHA="bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d"
@@ -274,4 +274,6 @@ if [ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ]; then
 else
   say "Done. Start the orb with $LAUNCHER (it starts by itself from your next login), then say \"Hey ${name:-Nova}\"."
 fi
-say "To make it answer only your voice (one minute): cd $REPO/backend && uv run enroll.py"
+if [ "$(cfgval engine)" = parakeet ]; then  # the voice check needs Parakeet (#32)
+  say "To make only your voice wake it (one minute, with the orb open): cd $REPO/backend && uv run enroll.py"
+fi

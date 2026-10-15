@@ -120,3 +120,8 @@ def test_learn_spellings_dedupes():
 def test_learned_phrases_only_from_a_list_of_strings(tmp_path, content, phrases):
     (tmp_path / "learned_wake.json").write_text(content)
     assert learned_wake_phrases(cfg(tmp_path)) == phrases
+
+
+def test_embed_is_public_and_none_without_the_model(tmp_path):
+    assert Voiceprint.load(cfg(tmp_path)).embed is None
+    assert Voiceprint(None, None, 0.6, fake_embed).embed is fake_embed
