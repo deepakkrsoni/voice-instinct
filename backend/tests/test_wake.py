@@ -260,3 +260,10 @@ def test_removed_phrases_no_longer_wake_it():
         await w.cleanup()
         return added, removed
     assert asyncio.run(go()) == (True, (False, True))  # the configured phrase still works
+
+
+def test_the_name_anywhere_wakes_it():
+    from config import Config
+    users, _, sent, _ = asyncio.run(converse(["could you, Nova, check the weather"],
+                                             early=lambda w: w.add_phrases(Config().wake_phrases)))
+    assert sent and sent[0] == {"type": "wake", "reason": "phrase"}

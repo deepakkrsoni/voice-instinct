@@ -81,9 +81,8 @@ def test_a_failure_building_the_voiceprint_is_logged_not_raised(tmp_path):
     assert not vp.enrolled and e.status()["done"] is False and e.status()["error"]
 
 
-def test_every_line_is_the_wake_phrase_with_a_short_request():
-    # as the owner really wakes it: "Hey Nova, what time is it?" is heard right 9 times in 10, a bare one 3 in 8
-    assert len(LINES) == 5 and all(line.startswith("Hey {name}, ") for line in LINES)
+def test_every_line_is_the_name_with_a_short_request():
+    assert len(LINES) == 5 and all(line.startswith("{name}, ") for line in LINES)
 
 
 def test_start_without_the_speaker_model_says_run_install(tmp_path):

@@ -14,11 +14,10 @@ from loguru import logger
 from voiceprint import (MIN_SPEECH_SECS, build_vector, delete_voiceprint, learn_spellings, learned_path,
                         WAKE_PREFIXES, learned_wake_phrases, save_voiceprint, speech_only)
 
-# The wake phrase with a short request, as the owner really wakes it (#32): heard right 9 times in 10, where a
-# bare "Hey Nova" was heard right 3 times in 8.
-LINES = ["Hey {name}, what time is it?", "Hey {name}, what's the weather tomorrow?",
-         "Hey {name}, remind me to call mom at six.", "Hey {name}, find me a cheap flight.",
-         "Hey {name}, what am I working on?"]
+# The name with a short request, as the owner wakes it (#32): "Nova" alone is heard right, where "Hey Nova" came
+# out as "hang over" or "Inova".
+LINES = ["{name}, what time is it?", "{name}, what's the weather tomorrow?", "{name}, remind me to call mom at six.",
+         "{name}, find me a cheap flight.", "{name}, what am I working on?"]
 EXPIRE_SECS = 60  # enroll.py killed mid-way: the assistant hears normally again after this
 
 

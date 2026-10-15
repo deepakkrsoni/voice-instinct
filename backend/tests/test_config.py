@@ -51,10 +51,14 @@ def test_flat_legacy_file_still_works(tmp_path):
     assert load(f).model == "gemini-3.8-flash" and load(f).name == "Nova"
 
 
-def test_wake_phrases_follow_the_name_whatever_its_case_or_spacing():
-    assert Config(name=" Nova ").wake_phrases == ["hey nova", "okay nova", "ok nova", "hay nova"]
-    assert Config(name="Mister  Bean").wake_phrases == ["hey mister bean", "okay mister bean", "ok mister bean",
-                                                        "hay mister bean"]
+def test_the_name_itself_is_the_wake_word_whatever_its_case_or_spacing():
+    # "Hey Nova" was heard as "hang over" or "Inova" by Parakeet and Deepgram alike; "Nova" alone came out right
+    assert Config(name=" Nova ").wake_phrases[0] == "nova"
+    assert Config(name="Mister  Bean").wake_phrases[0] == "mister bean"
+
+
+def test_the_merged_forms_speech_to_text_writes_also_wake_it():
+    assert {"inova", "innova", "anova", "enova", "hanova", "henova"} <= set(Config().wake_phrases)
 
 
 def test_bad_position_or_empty_name_fails_fast_with_a_clear_message(tmp_path):
@@ -102,10 +106,6 @@ def test_an_unknown_provider_fails_fast(tmp_path):
         load(f)
 
 
-def test_ok_spelled_the_way_speech_to_text_writes_it_also_wakes_it():
-    assert "ok nova" in Config().wake_phrases
-
-
 def test_debug_browser_steps_is_off_by_default_and_read_from_its_section(tmp_path):
     assert load(tmp_path / "missing.toml").debug_browser_steps is False
     p = tmp_path / "c.toml"
@@ -139,11 +139,6 @@ def test_an_unknown_stt_engine_is_refused_with_the_choices(tmp_path):
     p.write_text('[stt]\nengine = "whisper"\n')
     with pytest.raises(ValueError, match=r"\[stt\] engine must be one of nemotron, nemotron-multilingual, parakeet"):
         load(p)
-
-
-def test_hay_spelled_the_way_nemotron_writes_hey_also_wakes_it():
-    # Probed 2026-10-14: Nemotron streaming transcribes Kokoro's "Hey Nova" as "Hay Nova".
-    assert "hay nova" in Config().wake_phrases
 
 
 def test_voice_threshold_defaults_and_is_validated(tmp_path):

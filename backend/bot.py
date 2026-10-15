@@ -43,7 +43,7 @@ from shutdown import cancel_on_exit
 from steps import StepHub
 from telegram import Telegram
 from enrolment import Enrolment, make_enrol_router
-from voiceprint import Voiceprint, cohort_mean, learned_wake_phrases, owner_wake_phrases
+from voiceprint import Voiceprint, cohort_mean, learned_wake_phrases
 from wake import handle_client_message, make_dismiss, make_wake
 
 load_dotenv(REPO_ROOT / ".env")
@@ -70,11 +70,8 @@ HOOK_TOKEN = load_token(DATA / "hook-token")
 WAKES = set()  # open sessions' wake strategies, told about spellings learned at enrolment (#32)
 ENROLMENT = Enrolment(cfg, VOICEPRINT, embed=VOICEPRINT.embed,
                       cohort=lambda: cohort_mean(VOICEPRINT.embed, kokoro_paths(cfg)),
-                      on_learned=lambda phrases: [w.add_phrases(phrases + owner_wake_phrases(cfg.name))
-                                                  for w in list(WAKES)],
-                      # the name alone is only safe while the voiceprint guards it
-                      on_deleted=lambda learned: [w.remove_phrases(learned + owner_wake_phrases(cfg.name))
-                                                  for w in list(WAKES)])
+                      on_learned=lambda phrases: [w.add_phrases(phrases) for w in list(WAKES)],
+                      on_deleted=lambda learned: [w.remove_phrases(learned) for w in list(WAKES)])
 # Debug mode (config [debug] browser_steps): every errand browser step screenshotted (steps.py).
 STEPS = StepHub(Path.home(), telegram=Telegram.from_env()) if cfg.debug_browser_steps else None
 # Documented extension point (Running Bots Locally > Adding your own routes): the runner exports
@@ -149,10 +146,8 @@ async def bot(runner_args: RunnerArguments):
         if "worker" in holder:
             await holder["worker"].rtvi.send_server_message(msg)
 
-    phrases = cfg.wake_phrases + learned_wake_phrases(cfg)
-    if VOICEPRINT.enrolled:  # only the owner can wake it, so the name alone is safe (#32)
-        phrases += owner_wake_phrases(cfg.name)
-    wake = make_wake(phrases, cfg.awake_timeout, send_gui, hold=lambda: relay.asking)
+    wake = make_wake(cfg.wake_phrases + learned_wake_phrases(cfg), cfg.awake_timeout, send_gui,
+                     hold=lambda: relay.asking)
     WAKES.add(wake)
     # As Siri does: only a wake phrase said while asleep is voice-checked (#32)
     stt = make_stt(cfg, voiceprint=VOICEPRINT, enrolment=ENROLMENT, needs_check=wake.would_wake)

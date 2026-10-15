@@ -1,7 +1,7 @@
 # voice-instinct settings. Copy to config.toml (the installer does this) and edit.
 
 [assistant]
-name = "Nova"                 # you wake it with "Hey Nova" or "Okay Nova"
+name = "Nova"                 # say the name to wake it: "Nova, what's on today?"
 awake_timeout = 10            # seconds of quiet before the orb hides
 
 [model]

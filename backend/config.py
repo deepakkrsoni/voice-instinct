@@ -46,10 +46,12 @@ class Config:
 
     @property
     def wake_phrases(self) -> list[str]:
-        words = " ".join(self.name.lower().split())
-        # STT writes both "okay" and "OK"; Nemotron writes "Hey" as "Hay"
-        return [f"hey {words}", f"okay {words}", f"ok {words}", f"hay {words}"]
-
+        """The name itself, wherever it is said ("Nova, what's on?", "hey nova"), plus the merged forms speech-to-text
+        writes for a quick "Hey Nova" ("Inova", "Anova"). Measured 2026-10-16: Parakeet and Deepgram both heard the
+        owner's "Hey Nova" as "hang over" or "Inova", while "Nova" alone came out right (#32)."""
+        words = self.name.lower().split()
+        merged = [" ".join([p + words[0], *words[1:]]) for p in ("i", "in", "a", "e", "ha", "he", "hey", "o")]
+        return [" ".join(words), *merged]
 
 def load(path=None) -> Config:
     p = Path(path) if path else REPO_ROOT / "config.toml"

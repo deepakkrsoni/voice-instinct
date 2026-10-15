@@ -270,9 +270,9 @@ if [ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ]; then
     for _ in 1 2 3 4 5 6 7 8 9 10; do pgrep -f "electron/dist/electron.*$REPO/frontend" >/dev/null || break; sleep 0.5; done
     setsid -f "$LAUNCHER" >/dev/null 2>&1
   fi
-  say "Done. Say \"Hey ${name:-Nova}\"."
+  say "Done. Say \"${name:-Nova}\"."
 else
-  say "Done. Start the orb with $LAUNCHER (it starts by itself from your next login), then say \"Hey ${name:-Nova}\"."
+  say "Done. Start the orb with $LAUNCHER (it starts by itself from your next login), then say \"${name:-Nova}\"."
 fi
 if [ "$(cfgval engine)" = parakeet ]; then  # the voice check needs Parakeet (#32)
   say "To make only your voice wake it (one minute, with the orb open): cd $REPO/backend && uv run enroll.py"

@@ -24,7 +24,7 @@ def test_walks_the_lines_and_reports_what_it_learned():
     bot = FakeBot()
     assert run(cfg(), bot, say=said.append, sleep=lambda s: None) == 0
     assert ("POST", "/enrol/start") in bot.calls
-    assert any('"Hey Milo, what time is it?"' in s for s in said) and any("hey mailo" in s for s in said)
+    assert any('"Milo, what time is it?"' in s for s in said) and any("hey mailo" in s for s in said)
 
 
 def test_bot_not_running_says_start_milo_first():

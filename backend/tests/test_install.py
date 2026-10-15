@@ -44,7 +44,7 @@ def test_clean_checkout_dry_run_finishes(tmp_path):
     r, _ = run_clean(tmp_path, "--dry-run")
     assert r.returncode == 0, r.stderr
     assert "create config.toml from config.example.toml" in r.stdout
-    assert 'Done. Say "Hey Nova"' in r.stdout
+    assert 'Done. Say "Nova"' in r.stdout
     assert "systemctl --user restart voice-instinct.service" in r.stdout  # update re-run restarts the backend
     assert "nemo_en_titanet_small.onnx" in r.stdout  # speaker model (#32)
     assert "uv run enroll.py" not in r.stdout  # the default engine (Nemotron) has no voice check

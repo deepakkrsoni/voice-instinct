@@ -137,13 +137,6 @@ def test_a_damaged_voiceprint_turns_the_check_off_instead_of_stopping_milo(tmp_p
     assert not Voiceprint.load(c, embed=fake_embed).enrolled
 
 
-def test_once_enrolled_the_name_alone_and_its_merged_forms_wake_it():
-    from voiceprint import owner_wake_phrases
-    p = owner_wake_phrases("Nova")
-    assert "nova" in p and {"inova", "anova", "enova", "hanova", "henova"} <= set(p)
-    assert owner_wake_phrases("Big Ben")[0] == "big ben"
-
-
 
 @pytest.mark.parametrize("said, kept", [
     ("Hey Mailo, what time is it?", ["hey mailo"]), ("Hey my luck, what time is it?", []),
