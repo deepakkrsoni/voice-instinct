@@ -139,7 +139,7 @@ class Voiceprint:
         if not self.enrolled:
             return True
         s = self.score(pcm)
-        logger.debug(f"voice check {s}: {'owner' if s is not None and s >= self.threshold else 'not the owner'}")
+        logger.info(f"voice check {s if s is None else round(s, 2)} (cut-off {self.threshold}): {'owner' if s is not None and s >= self.threshold else 'not the owner'}")
         return s is not None and s >= self.threshold
 
 
