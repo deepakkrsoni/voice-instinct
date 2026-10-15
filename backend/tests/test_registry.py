@@ -114,3 +114,22 @@ def test_a_task_is_found_by_its_id():
     tid = reg.create_task("s1", "find t-shirts")
     assert reg.get_task(tid)["session_id"] == "s1" and reg.get_task(tid)["request"] == "find t-shirts"
     assert reg.get_task(tid + 99) is None
+
+
+def test_reminders_add_list_due_cancel():
+    reg = Registry(clock=lambda: 100.0)
+    a = reg.add_reminder("call mom", 500.0, "none")
+    b = reg.add_reminder("water", 200.0, "daily")
+    assert [r["id"] for r in reg.pending_reminders()] == [b, a]  # soonest first
+    assert [r["id"] for r in reg.due_reminders(300.0)] == [b]
+    assert reg.cancel_reminder(a) and not reg.cancel_reminder(a)
+    assert [r["id"] for r in reg.pending_reminders()] == [b]
+
+
+def test_a_reminder_is_claimed_once_and_can_be_put_back():
+    reg = Registry()
+    r = reg.add_reminder("x", 1.0, "none")
+    assert reg.mark_fired(r, 2.0) and not reg.mark_fired(r, 2.0)
+    assert reg.due_reminders(5.0) == []
+    reg.unfire_reminder(r)
+    assert [x["id"] for x in reg.due_reminders(5.0)] == [r]

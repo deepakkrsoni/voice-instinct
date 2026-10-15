@@ -31,6 +31,10 @@ CREATE TABLE IF NOT EXISTS conversation(
   id INTEGER PRIMARY KEY CHECK (id = 1), messages_json TEXT NOT NULL, updated_at REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS conversation_bad(
   id INTEGER PRIMARY KEY, messages_json TEXT NOT NULL, at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS reminders(
+  id INTEGER PRIMARY KEY, text TEXT NOT NULL, due REAL NOT NULL, repeat TEXT NOT NULL DEFAULT 'none',
+  status TEXT NOT NULL DEFAULT 'pending', created REAL NOT NULL, fired REAL);
+CREATE INDEX IF NOT EXISTS reminders_due ON reminders(status, due);
 CREATE INDEX IF NOT EXISTS events_by_session ON events(session_id, at);
 CREATE INDEX IF NOT EXISTS questions_by_status ON questions(status);
 """
@@ -152,3 +156,27 @@ class Registry:
               (SELECT request FROM tasks t WHERE t.session_id=s.id ORDER BY t.id DESC LIMIT 1) AS last_task
             FROM sessions s {where} ORDER BY s.started_at DESC""")
         return [dict(r) for r in rows]
+
+    def add_reminder(self, text, due, repeat="none"):
+        return self.db.execute("INSERT INTO reminders(text, due, repeat, created) VALUES(?, ?, ?, ?)",
+                               (text, due, repeat, self.clock())).lastrowid
+
+    def pending_reminders(self):
+        return [dict(r) for r in self.db.execute(
+            "SELECT * FROM reminders WHERE status='pending' ORDER BY due")]
+
+    def due_reminders(self, now):
+        return [dict(r) for r in self.db.execute(
+            "SELECT * FROM reminders WHERE status='pending' AND due<=? ORDER BY due", (now,))]
+
+    def cancel_reminder(self, rid):
+        return self.db.execute("UPDATE reminders SET status='cancelled' WHERE id=? AND status='pending'",
+                               (rid,)).rowcount == 1
+
+    def mark_fired(self, rid, now):
+        """Atomic claim: only one caller wins, so a reminder can never fire twice."""
+        return self.db.execute("UPDATE reminders SET status='fired', fired=? WHERE id=? AND status='pending'",
+                               (now, rid)).rowcount == 1
+
+    def unfire_reminder(self, rid):
+        self.db.execute("UPDATE reminders SET status='pending', fired=NULL WHERE id=? AND status='fired'", (rid,))
