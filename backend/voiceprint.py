@@ -1,5 +1,6 @@
 """The owner's voice (#32): a TitaNet-small speaker embedding, made by enrolling through Milo itself
-(enrolment.py) and checked on every Parakeet segment. No voiceprint file means the check is off.
+(enrolment.py) and checked on the wake phrase while Milo sleeps, as Siri does. No voiceprint
+file means the check is off.
 
 Spike 2 (orb audio, 26 owner lines, 25 phone segments): EER 0 to 5%, cut-off 0.60. Speech only, because a
 segment is mostly silence; cohort-centred, because short clips share a lot whoever speaks."""

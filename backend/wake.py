@@ -57,6 +57,13 @@ class ProgrammaticWake(WakePhraseUserTurnStartStrategy):
         if self.awake:
             self._refresh_timeout()
 
+    def would_wake(self, text: str) -> bool:
+        """Asleep, and this text has a wake phrase: the one segment the owner check judges (#32)."""
+        if self.awake:
+            return False
+        text = self._strip_punctuation(text)
+        return any(p.search(text) for p in self._patterns)
+
     def add_phrases(self, phrases) -> None:
         """More wake phrases (learned at enrolment), compiled like the strategy's own in __init__."""
         for phrase in phrases:

@@ -76,7 +76,7 @@ class ParakeetSTTService(SegmentedSTTService):
     wants_wav_segments = False
 
     def __init__(self, model_dir: Path | None = None, recognizer=None, voiceprint=None, enrolment=None,
-                 **kwargs):
+                 needs_check=None, **kwargs):
         super().__init__(
             sample_rate=16000,
             ttfs_p99_latency=1.3,  # the 0.8 s pause plus decoding
@@ -85,7 +85,8 @@ class ParakeetSTTService(SegmentedSTTService):
         )
         self._rec = recognizer or _load_recognizer(model_dir)
         self._cut = None
-        self._voiceprint = voiceprint  # #32: only the owner's segments are decoded
+        self._voiceprint = voiceprint  # #32: only the owner's wake phrase wakes Milo
+        self._needs_check = needs_check  # text -> bool: asleep and a wake phrase (ProgrammaticWake.would_wake)
         self._enrolment = enrolment  # #32: while enrolling, segments are takes (enrolment.py)
 
     def can_generate_metrics(self) -> bool:
@@ -158,12 +159,13 @@ class ParakeetSTTService(SegmentedSTTService):
             text = await asyncio.to_thread(self._decode, audio)
             await asyncio.to_thread(self._enrolment.offer, audio, text)
             return
-        # Checked before decoding: someone else's speech is never even transcribed (#32).
-        if self._voiceprint is not None and not await asyncio.to_thread(self._voiceprint.is_owner, audio):
-            return
         await self.start_processing_metrics()
         text = await asyncio.to_thread(self._decode, audio)
         await self.stop_processing_metrics()
+        # As Siri and Google: only the wake phrase is voice-checked, then the conversation is trusted (#32).
+        if (text and self._voiceprint is not None and self._needs_check is not None and self._needs_check(text)
+                and not await asyncio.to_thread(self._voiceprint.is_owner, audio)):
+            return
         if text:  # never logged: until the wake phrase this is whatever the room is saying
             yield TranscriptionFrame(text, self._user_id, time_now_iso8601())
 
@@ -249,13 +251,14 @@ def stt_dir(cfg) -> Path:
     return Path(cfg.models_dir).expanduser() / STT_MODELS[cfg.stt_engine]
 
 
-def make_stt(cfg, recognizer=None, voiceprint=None, enrolment=None):
+def make_stt(cfg, recognizer=None, voiceprint=None, enrolment=None, needs_check=None):
     """The configured speech-to-text service. recognizer: a fake for tests. voiceprint: Parakeet only (#32)."""
     d = stt_dir(cfg)
     if recognizer is None and not d.is_dir():
         raise RuntimeError(f"The {cfg.stt_engine} speech model is not installed ({d}). Run ./install.sh.")
     if cfg.stt_engine == "parakeet":
-        return ParakeetSTTService(model_dir=d, recognizer=recognizer, voiceprint=voiceprint, enrolment=enrolment)
+        return ParakeetSTTService(model_dir=d, recognizer=recognizer, voiceprint=voiceprint, enrolment=enrolment,
+                                  needs_check=needs_check)
     return NemotronSTTService(model_dir=d, recognizer=recognizer,
                               language=Language.EN if cfg.stt_engine == "nemotron" else None)
 

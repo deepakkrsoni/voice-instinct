@@ -13,8 +13,9 @@ from loguru import logger
 from voiceprint import (MIN_SPEECH_SECS, build_vector, delete_voiceprint, learn_spellings, learned_path,
                         save_voiceprint, speech_only)
 
-LINES = ["Hey {name}", "Hey {name}", "Hey {name}", "Book a table for two at eight tonight.",
-         "Find me a cheap flight to Bangalore next Friday.", "What am I working on right now?"]
+# All start with the wake phrase, as Siri's setup does: the check judges only the wake phrase (#32).
+LINES = ["Hey {name}", "Hey {name}", "Hey {name}", "Hey {name}, what's the weather tomorrow?",
+         "Hey {name}, remind me to call mom at six."]
 EXPIRE_SECS = 60  # enroll.py killed mid-way: Milo hears normally again after this
 
 

@@ -217,3 +217,17 @@ def test_assistant_turn_done_keeps_awake_when_not_dismissing():
 def test_learned_phrases_wake_it_once_added():
     users, _, sent, _ = asyncio.run(converse(["Hey Mailo, hello"], early=lambda w: w.add_phrases(["hey mailo"])))
     assert users == ["Hey Mailo, hello"] and sent[0] == {"type": "wake", "reason": "phrase"}
+
+
+def test_would_wake_only_while_asleep_and_only_with_the_phrase():
+    async def go():
+        async def send(m):
+            pass
+        w = make_wake(["hey nova"], 30, send)
+        await w.setup(SimpleNamespace(task_manager=TaskManager(loop=asyncio.get_running_loop())))
+        asleep = (w.would_wake("Hey, Nova! What's on?"), w.would_wake("what's on today"))
+        w.wake("shown")
+        awake = w.would_wake("Hey Nova")
+        await w.cleanup()
+        return asleep, awake
+    assert asyncio.run(go()) == ((True, False), False)

@@ -23,12 +23,12 @@ def make(tmp_path, clock=None):
     return e, vp, learned
 
 
-def test_six_segments_make_a_live_voiceprint_and_learned_spellings(tmp_path):
+def test_five_segments_make_a_live_voiceprint_and_learned_spellings(tmp_path):
     e, vp, learned = make(tmp_path)
     e.start()
-    for text in ["Hey Milo.", "Hey Mailo", "Hey my luck", "a", "b", "c"]:
+    for text in ["Hey Milo.", "Hey Mailo", "Hey my luck", "Hey Milo, a", "Hey Milo, b"]:
         e.offer(speech(), text)
-    assert not e.active and e.status() == {"active": False, "heard": 6, "done": True, "learned": ["hey mailo"],
+    assert not e.active and e.status() == {"active": False, "heard": 5, "done": True, "learned": ["hey mailo"],
                                          "error": None}
     assert vp.enrolled and voiceprint_path(e.cfg).exists()
     assert json.loads(learned_path(e.cfg).read_text()) == ["hey mailo"] and learned == [["hey mailo"]]
@@ -79,3 +79,7 @@ def test_a_failure_building_the_voiceprint_is_logged_not_raised(tmp_path):
     for _ in LINES:
         e.offer(speech(), "Hey Milo")  # must not raise into the STT
     assert not vp.enrolled and e.status()["done"] is False and e.status()["error"]
+
+
+def test_every_line_starts_with_the_wake_phrase():
+    assert len(LINES) == 5 and all(line.startswith("Hey {name}") for line in LINES)

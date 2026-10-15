@@ -122,23 +122,28 @@ class FakePrint:
         return self.owner
 
 
-def run_checked(owner):
+def run_checked(owner, wake_phrase=True):
     rec, vp = FakeOffline(), FakePrint(owner)
-    stt = ParakeetSTTService(recognizer=rec, voiceprint=vp)
+    stt = ParakeetSTTService(recognizer=rec, voiceprint=vp, needs_check=lambda text: wake_phrase)
     stt.PAUSE_SECS = 0.05
     down, _ = asyncio.run(run_test(stt, frames_to_send=[
         VADUserStartedSpeakingFrame(), *speech(), VADUserStoppedSpeakingFrame(), SleepFrame(sleep=0.3)]))
     return rec.segments, vp.checked, [f for f in down if isinstance(f, TranscriptionFrame)]
 
 
-def test_the_owners_segment_is_transcribed():
+def test_the_owners_wake_phrase_is_let_through():
     segments, checked, finals = run_checked(True)
     assert checked == 1 and len(segments) == 1 and len(finals) == 1
 
 
-def test_someone_elses_segment_is_never_decoded_or_sent():
+def test_someone_elses_wake_phrase_is_dropped():
     segments, checked, finals = run_checked(False)
-    assert checked == 1 and segments == [] and finals == []
+    assert checked == 1 and len(segments) == 1 and finals == []  # decoded to find the phrase, then dropped
+
+
+def test_while_awake_nothing_is_checked():
+    segments, checked, finals = run_checked(False, wake_phrase=False)
+    assert checked == 0 and len(finals) == 1  # Siri-style: the conversation is trusted until Milo sleeps
 
 
 class FakeEnrolment:
