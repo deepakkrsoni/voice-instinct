@@ -46,8 +46,11 @@ class FakeRelay:
     def __init__(self, attached=True):
         self.attached, self.said = attached, []
 
-    def say(self, text):
+    def say(self, text, on_spoken=None, on_dropped=None):
         self.said.append(text)
+        self.pending = (on_spoken, on_dropped)
+        if not getattr(self, "hold", False) and on_spoken:
+            on_spoken()  # spoken at once, as a quiet relay would
 
 
 class FakeTelegram:
@@ -197,3 +200,28 @@ def test_the_tools_build_valid_schemas():
     names = {s.name for s in LLMContext._normalize_and_validate_tools(
         make_reminder_tools(Registry(), None)).standard_tools}
     assert names == {"set_reminder", "list_reminders", "cancel_reminder", "send_telegram"}
+
+
+
+def test_a_spoken_reminder_dropped_before_it_was_said_is_retried():
+    now = [ts(2026, 10, 16, 15, 0, IN)]
+    reg, relay, tg, r = make(now)
+    relay.hold = True  # queued for a quiet moment that never comes
+    reg.add_reminder("water", now[0], "daily")
+    tick(r)
+    assert reg.pending_reminders() == []  # in flight, and no next occurrence yet
+    relay.pending[1]()  # the session detached
+    relay.attached = False
+    tick(r)
+    assert tg.sent and len(reg.pending_reminders()) == 1  # sent by Telegram, then the next daily one
+
+
+def test_a_restart_puts_reminders_in_flight_back():
+    now = [ts(2026, 10, 16, 15, 0, IN)]
+    reg, relay, tg, r = make(now)
+    relay.hold = True
+    reg.add_reminder("water", now[0], "none")
+    tick(r)
+    r2 = Reminders(reg, FakeRelay(attached=False), tg, locked=lambda: False, clock=lambda: now[0], tz=IN)
+    tick(r2)  # a fresh scheduler, as after a bot restart
+    assert tg.sent == ["⏰ water (3:00 pm)"]

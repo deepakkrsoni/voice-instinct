@@ -589,3 +589,21 @@ def test_say_waits_for_a_quiet_moment():
 
 def test_not_attached_without_a_session():
     assert not Relay(Registry()).attached
+
+
+def test_a_note_reports_when_it_is_spoken_and_when_it_is_dropped():
+    async def go():
+        reg = Registry()
+        relay = Relay(reg)
+        task = FakeTask()
+        await relay.attach_and_pump(task, FakeContext())
+        events = []
+        relay.say("one", on_spoken=lambda: events.append("spoken1"), on_dropped=lambda: events.append("dropped1"))
+        await asyncio.sleep(0.01)
+        relay.bot_turn(True)  # mid-reply: the next note must wait
+        relay.say("two", on_spoken=lambda: events.append("spoken2"), on_dropped=lambda: events.append("dropped2"))
+        await asyncio.sleep(0.01)
+        relay.detach(task)  # the orb dropped before a quiet moment
+        return events
+
+    assert run(go()) == ["spoken1", "dropped2"]

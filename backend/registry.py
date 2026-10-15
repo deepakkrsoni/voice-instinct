@@ -178,5 +178,12 @@ class Registry:
         return self.db.execute("UPDATE reminders SET status='fired', fired=? WHERE id=? AND status='pending'",
                                (now, rid)).rowcount == 1
 
+    def mark_delivered(self, rid):
+        self.db.execute("UPDATE reminders SET status='done' WHERE id=? AND status='fired'", (rid,))
+
+    def requeue_in_flight(self):
+        """Claimed but never delivered (the bot stopped before Nova said it): pending again, so none is lost."""
+        return self.db.execute("UPDATE reminders SET status='pending', fired=NULL WHERE status='fired'").rowcount
+
     def unfire_reminder(self, rid):
         self.db.execute("UPDATE reminders SET status='pending', fired=NULL WHERE id=? AND status='fired'", (rid,))

@@ -133,3 +133,13 @@ def test_a_reminder_is_claimed_once_and_can_be_put_back():
     assert reg.due_reminders(5.0) == []
     reg.unfire_reminder(r)
     assert [x["id"] for x in reg.due_reminders(5.0)] == [r]
+
+
+def test_a_reminder_in_flight_is_done_once_delivered_or_put_back_on_restart():
+    reg = Registry()
+    a, b = reg.add_reminder("a", 1.0, "none"), reg.add_reminder("b", 1.0, "none")
+    reg.mark_fired(a, 2.0)
+    reg.mark_fired(b, 2.0)
+    reg.mark_delivered(a)
+    assert reg.requeue_in_flight() == 1  # b was never delivered: a restart puts it back
+    assert [r["id"] for r in reg.due_reminders(5.0)] == [b]

@@ -71,25 +71,38 @@ class Reminders:
         self.reg, self.relay, self.telegram, self.locked, self.clock = registry, relay, telegram, locked, clock
         self.tz = tz or local_zone()
         self._task = None
+        self._recovered = False
 
     async def tick(self):
         now = self.clock()
+        if not self._recovered:  # left in flight by a previous run that stopped before saying them
+            self._recovered = True
+            if n := self.reg.requeue_in_flight():
+                logger.info(f"{n} reminder(s) were never delivered; retrying")
         for r in self.reg.due_reminders(now):
             if not self.reg.mark_fired(r["id"], now):
                 continue  # claimed elsewhere, or cancelled meanwhile
-            if not await self._deliver(r, now):
+            sent = await self._deliver(r, now)
+            if sent is False:
                 self.reg.unfire_reminder(r["id"])  # no channel: kept, retried next tick
-                continue
-            logger.info(f"reminder {r['id']} delivered")  # never the text
-            if r["repeat"] != "none":  # only after delivery, so an undeliverable one can't multiply
-                self.reg.add_reminder(r["text"], next_due(r["due"], r["repeat"], now, self.tz), r["repeat"])
+            elif sent is True:
+                self._delivered(r, now)  # "queued": _delivered runs once Nova has actually said it
 
-    async def _deliver(self, r, now) -> bool:
+    def _delivered(self, r, now):
+        self.reg.mark_delivered(r["id"])
+        logger.info(f"reminder {r['id']} delivered")  # never the text
+        if r["repeat"] != "none":  # only after delivery, so an undeliverable one can't multiply
+            self.reg.add_reminder(r["text"], next_due(r["due"], r["repeat"], now, self.tz), r["repeat"])
+
+    async def _deliver(self, r, now):
+        """True: delivered. "queued": waiting for a quiet moment to be spoken. False: no channel."""
         when = spoken_time(r["due"], self.tz, now)
         late = f" (was due at {when})" if now - r["due"] > LATE_SECS else ""
         if self.relay.attached and not await asyncio.to_thread(self.locked):
-            self.relay.say(f"A reminder the user set is due now{late}: {r['text']}")
-            return True
+            self.relay.say(f"A reminder the user set is due now{late}: {r['text']}",
+                           on_spoken=lambda: self._delivered(r, now),
+                           on_dropped=lambda: self.reg.unfire_reminder(r["id"]))
+            return "queued"
         if self.telegram is not None:
             return await self.telegram.send_message(f"⏰ {r['text']} ({when})" + (" — late" if late else ""))
         return False
