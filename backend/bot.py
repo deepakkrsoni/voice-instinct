@@ -29,7 +29,8 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMUserAggregatorParams,
 )
 from pipecat.runner.run import app
-from pipecat.turns.user_turn_strategies import UserTurnStrategies, default_user_turn_start_strategies
+from pipecat.turns.user_start import TranscriptionUserTurnStartStrategy
+from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.kokoro.tts import KokoroTTSService
@@ -42,7 +43,8 @@ from services import build_llm, kokoro_paths, make_stt
 from shutdown import cancel_on_exit
 from steps import StepHub
 from telegram import Telegram
-from wake import handle_client_message, make_wake
+from voiceprint import OwnerVADUserTurnStartStrategy, Voiceprint, learned_wake_phrases
+from wake import handle_client_message, make_dismiss, make_wake
 
 load_dotenv(REPO_ROOT / ".env")
 
@@ -54,6 +56,10 @@ def _quiet_logs():
     logger.add(sys.stderr, level=os.environ.get("VI_LOG_LEVEL", "INFO"))  # VI_LOG_LEVEL=DEBUG to debug
 
 cfg = load()
+VOICEPRINT = Voiceprint.load(cfg)  # #32: no file means everyone is heard, as before enrolment
+if VOICEPRINT.enrolled and cfg.stt_engine != "parakeet":  # Nemotron streams, with no segment to check
+    logger.warning('voice check off: it needs [stt] engine = "parakeet"')
+    VOICEPRINT = Voiceprint(None, cfg.voice_threshold)
 DATA = Path(cfg.data_dir).expanduser()
 registry = Registry(DATA / "harness.db")
 registry.expire_open()  # questions left open by a previous run can no longer be answered
@@ -88,7 +94,10 @@ SYSTEM_PROMPT = (
     "about an earlier errand (check again, refine it, what about those), call delegate with its "
     "errand id; for a new topic leave errand out. When you are told a session needs a decision, "
     "ask the user, then call answer_question after they answer. Use list_sessions to answer what "
-    "you are working on and stop_session to stop one. Never claim a task is done unless a tool "
+    "you are working on and stop_session to stop one. "
+    "When the user says stop, that's all, go away or similar, say one short goodbye and call dismiss: "
+    "that ends the conversation and never stops an errand. Use stop_session only when they ask to stop "
+    "a particular errand. Never claim a task is done unless a tool "
     "result says done."
 )
 
@@ -102,7 +111,7 @@ def _browser_config():
 HOOK_PORT = 7860  # the runner's port: hooks post back to this same server
 
 NO_AGENT = (
-    " Right now Claude Code is not available on this computer, so you have no tools and cannot run "
+    " Right now Claude Code is not available on this computer, so you cannot run "
     "errands. If the user asks for one, say that Claude Code needs to be installed and logged in "
     "first (run claude once in a terminal), then restart voice-instinct."
 )
@@ -116,14 +125,23 @@ async def bot(runner_args: RunnerArguments):
     _quiet_logs()
     transport = await create_transport(runner_args, transport_params)
 
-    stt = make_stt(cfg)
+    stt = make_stt(cfg, voiceprint=VOICEPRINT)
     backend = ClaudeCodeBackend(cmd=os.environ.get("VI_CLAUDE", "claude"), cwd=cfg.backend_cwd,
                                 timeout=cfg.backend_timeout, permission_mode=cfg.permission_mode,
                                 hide_env=(cfg.api_key_env, "TELEGRAM_CHAT_ID"),  # the bot token goes as *_TOKEN
                                 mcp_config=_browser_config())
     prompt = f"Your name is {cfg.name}. " + SYSTEM_PROMPT  # set in config.toml; never from history
     llm = build_llm(cfg, prompt if backend.available() else prompt + NO_AGENT)
-    tools = []
+    holder = {}
+
+    async def send_gui(msg):
+        if "worker" in holder:
+            await holder["worker"].rtvi.send_server_message(msg)
+
+    wake = make_wake(cfg.wake_phrases + learned_wake_phrases(cfg), cfg.awake_timeout, send_gui,
+                     hold=lambda: relay.asking)
+
+    tools = [make_dismiss(wake)]  # "stop" works with or without Claude (#32)
     if backend.available():
         autonomy = sandbox_settings(Path.home(), REPO_ROOT, DATA, hook_port=HOOK_PORT)
         settings_for = lambda sid, debug_cwd=None: write_run_settings(
@@ -131,7 +149,7 @@ async def bot(runner_args: RunnerArguments):
             extra=autonomy if debug_cwd is None else with_debug_record(autonomy, debug_cwd, Path.home()),
             hook_timeout=int(cfg.permission_timeout) + 10)  # Claude must outwait our own question timeout
         # Tools declare their own options with @tool_options; the context's tools (make_context) are the registration.
-        tools = [*make_tools(backend, registry, settings_for, on_finish=bridge.expire_session,
+        tools += [*make_tools(backend, registry, settings_for, on_finish=bridge.expire_session,
                              workspace_root=Path(cfg.workspace_dir).expanduser(), steps=STEPS, budget=BUDGET),
                  *make_bridge_tools(bridge, relay, registry, backend)]
     else:
@@ -146,22 +164,16 @@ async def bot(runner_args: RunnerArguments):
     markdown = MarkdownTextFilter()
     tts.add_text_transformer(lambda text, _type: markdown.filter(text), "*")
 
-    holder = {}
-
-    async def send_gui(msg):
-        if "worker" in holder:
-            await holder["worker"].rtvi.send_server_message(msg)
-
-    wake = make_wake(cfg.wake_phrases, cfg.awake_timeout, send_gui, hold=lambda: relay.asking)
-
     context = make_context(registry, tools)  # the one ongoing conversation, from where it left off (#24)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         # Defaults: Smart Turn v3 stop strategy (Speech Input & Turn Detection > Best Practices).
         user_params=LLMUserAggregatorParams(
             vad_analyzer=SileroVADAnalyzer(),
-            # Documented: a wake phrase gates every turn; the defaults follow it.
-            user_turn_strategies=UserTurnStrategies(start=[wake, *default_user_turn_start_strategies()]),
+            # Documented: a wake phrase gates every turn. Pipecat's VAD start is swapped for one that
+            # starts a turn (and so interrupts Milo) only on the owner's voice (#32).
+            user_turn_strategies=UserTurnStrategies(start=[
+                wake, OwnerVADUserTurnStartStrategy(VOICEPRINT), TranscriptionUserTurnStartStrategy()]),
         ),
         assistant_params=ASSISTANT_PARAMS,  # older turns are summarized, so it stays bounded
     )
@@ -201,7 +213,7 @@ async def bot(runner_args: RunnerArguments):
     @assistant_aggregator.event_handler("on_assistant_turn_stopped")
     async def on_assistant_turn_stopped(aggregator, *args):
         relay.bot_turn(False)
-        wake.keep_awake()  # the user can reply without the phrase
+        wake.assistant_turn_done()  # the user can reply without the phrase, unless they said stop
         save_conversation(registry, context)
 
     @transport.event_handler("on_client_connected")
