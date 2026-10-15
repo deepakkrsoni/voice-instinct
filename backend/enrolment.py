@@ -25,6 +25,7 @@ class Enrolment:
         self.on_learned, self._clock = on_learned, clock
         self._lock = threading.Lock()  # offer() runs in the STT's worker thread
         self._takes, self._since, self._done, self._learned, self._error = None, 0.0, False, [], None
+        self._finishing = False  # all takes in, the voiceprint being built
 
     @property
     def ready(self) -> bool:
@@ -57,13 +58,16 @@ class Enrolment:
             self._since = self._clock()
             if len(self._takes) < len(LINES):
                 return
-            takes, self._takes = self._takes, None
+            takes, self._takes, self._finishing = self._takes, None, True
         try:
             self._finish(takes)
         except Exception as e:  # never into the STT: Milo keeps working, enroll.py reports it
             logger.exception("enrolment failed")
             with self._lock:
                 self._error = str(e) or type(e).__name__
+        finally:
+            with self._lock:
+                self._finishing = False
 
     def _finish(self, takes) -> None:
         mean = self._cohort()
@@ -81,7 +85,8 @@ class Enrolment:
     def status(self) -> dict:
         active = self.active
         with self._lock:
-            return {"active": active, "heard": len(self._takes or []) if active else (len(LINES) if self._done else 0),
+            heard = len(self._takes or []) if active else (len(LINES) if self._done or self._finishing else 0)
+            return {"active": active, "heard": heard,
                     "done": self._done, "learned": self._learned, "error": self._error}
 
     def delete(self):

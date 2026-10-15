@@ -58,10 +58,11 @@ class ProgrammaticWake(WakePhraseUserTurnStartStrategy):
             self._refresh_timeout()
 
     def would_wake(self, text: str) -> bool:
-        """Asleep, and this text has a wake phrase: the one segment the owner check judges (#32)."""
+        """Asleep, and this text completes a wake phrase: the segment the owner check judges (#32). Joined to
+        the gate's accumulated text, as Pipecat matches it, so "Okay." ... "Milo, ..." is checked too."""
         if self.awake:
             return False
-        text = self._strip_punctuation(text)
+        text = self._accumulated_text + " " + self._strip_punctuation(text)
         return any(p.search(text) for p in self._patterns)
 
     def add_phrases(self, phrases) -> None:

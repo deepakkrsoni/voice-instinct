@@ -80,3 +80,38 @@ def test_delete_reports_a_refusal_instead_of_success():
     said = []
     assert run(cfg(), lambda m, p: {"error": "Forbidden"}, say=said.append, sleep=lambda s: None, delete=True) == 1
     assert not any("deleted" in s for s in said)
+
+
+def _real_bot(tmp_path, cohort):
+    """enroll.run against the real Enrolment: each status poll, Milo 'hears' the next line."""
+    import numpy as np
+    from enrolment import Enrolment
+    from voiceprint import Voiceprint
+    vp = Voiceprint(None, None, 0.6, lambda x: np.array([1.0, 0.0, 1.0]) / 2 ** 0.5)
+    e = Enrolment(Config(data_dir=str(tmp_path), name="Milo"), vp, embed=vp.embed, cohort=cohort)
+    take = (np.full(16000, 0.3) * 32767).astype(np.int16).tobytes()
+
+    def call(method, path):
+        if path == "/enrol/start":
+            e.start()
+        elif path == "/enrol/cancel":
+            e.cancel()
+        elif path == "/enrol/status" and e.active:
+            e.offer(take, "Hey Milo")
+        return e.status()
+    return call, vp
+
+
+def test_with_the_real_enrolment_a_build_failure_is_reported_not_blamed_on_the_mic(tmp_path):
+    import numpy as np
+    said = []
+    call, vp = _real_bot(tmp_path, cohort=lambda: (_ for _ in ()).throw(RuntimeError("kokoro broke")))
+    assert run(cfg(), call, say=said.append, sleep=lambda s: None) == 1
+    assert any("kokoro broke" in s for s in said) and not any("mic" in s for s in said)
+
+
+def test_with_the_real_enrolment_it_completes(tmp_path):
+    import numpy as np
+    said = []
+    call, vp = _real_bot(tmp_path, cohort=lambda: np.array([0.0, 0.0, 2 ** -0.5]))
+    assert run(cfg(), call, say=said.append, sleep=lambda s: None) == 0 and vp.enrolled

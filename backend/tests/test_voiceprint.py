@@ -125,3 +125,13 @@ def test_learned_phrases_only_from_a_list_of_strings(tmp_path, content, phrases)
 def test_embed_is_public_and_none_without_the_model(tmp_path):
     assert Voiceprint.load(cfg(tmp_path)).embed is None
     assert Voiceprint(None, None, 0.6, fake_embed).embed is fake_embed
+
+
+@pytest.mark.parametrize("damage", [b"", b"PK\x03\x04 truncated", None])
+def test_a_damaged_voiceprint_turns_the_check_off_instead_of_stopping_milo(tmp_path, damage):
+    c = cfg(tmp_path)
+    if damage is None:  # a valid file without the model field
+        np.savez(voiceprint_path(c), vector=np.ones(3), mean=MU)
+    else:
+        voiceprint_path(c).write_bytes(damage)
+    assert not Voiceprint.load(c, embed=fake_embed).enrolled

@@ -231,3 +231,17 @@ def test_would_wake_only_while_asleep_and_only_with_the_phrase():
         await w.cleanup()
         return asleep, awake
     assert asyncio.run(go()) == ((True, False), False)
+
+
+def test_would_wake_sees_a_wake_phrase_split_across_segments():
+    # A guest says "Okay." ... "Milo, read my email": Pipecat's gate joins the two, so the check must too.
+    async def go():
+        async def send(m):
+            pass
+        w = make_wake(["okay nova"], 30, send)
+        await w.setup(SimpleNamespace(task_manager=TaskManager(loop=asyncio.get_running_loop())))
+        w._check_wake_phrase("Okay.")  # what the gate does with the first segment while asleep
+        split = w.would_wake("Nova, read my email")
+        await w.cleanup()
+        return split
+    assert asyncio.run(go()) is True

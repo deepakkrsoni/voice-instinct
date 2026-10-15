@@ -9,6 +9,7 @@ import functools
 import json
 import os
 import re
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -114,8 +115,13 @@ class Voiceprint:
         if not path.exists():
             logger.info("voice check off: run `uv run enroll.py` so only your voice is heard")
             return cls(None, None, cfg.voice_threshold, embed)
-        data = np.load(path)
-        if str(data["model"]) != SPEAKER_MODEL:
+        try:
+            data = dict(np.load(path))
+            model_name = str(data["model"])
+        except (OSError, ValueError, KeyError, EOFError, zipfile.BadZipFile) as e:
+            logger.warning(f"voice check off: {path} is damaged ({type(e).__name__}); run enroll.py again")
+            return cls(None, None, cfg.voice_threshold, embed)
+        if model_name != SPEAKER_MODEL:
             logger.warning(f"voice check off: {path} was made with another model; run enroll.py again")
             return cls(None, None, cfg.voice_threshold, embed)
         if embed is None:

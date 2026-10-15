@@ -61,13 +61,15 @@ def run(cfg, call, say=print, sleep=time.sleep, delete=False) -> int:
         for _ in range(WAIT_SECS * 4):
             st = call("GET", "/enrol/status") or {}
             heard = st.get("heard", heard)
-            if heard >= i or st.get("done"):
+            if heard >= i or st.get("done") or st.get("error"):
                 break
             sleep(0.25)
         else:
             call("POST", "/enrol/cancel")
             say("\nNothing heard for 20 s: is the orb's mic muted? Nothing was saved; run this again.")
             return 1
+        if st.get("error"):
+            break
         say("  ✓ got it")
         if st.get("done"):
             break
