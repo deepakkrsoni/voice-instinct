@@ -1,31 +1,59 @@
-import json
-
-import numpy as np
-
 from config import Config
-from enroll import LINES, delete, enroll
-from voiceprint import learned_path, voiceprint_path
+from enroll import run
+from enrolment import LINES
 
 
-def test_enrol_saves_a_voiceprint_and_learned_spellings(tmp_path):
-    cfg = Config(data_dir=str(tmp_path), name="Milo")
-    heard = iter(["Hey Milo.", "Hey Mailo", "Hey my luck"])
-    scores = enroll(cfg, record=lambda secs: b"\x01\x00" * 100,
-                    embed=lambda pcm, rate=16000: np.array([1.0, 0.0]),
-                    transcribe=lambda pcm: next(heard), say=lambda *a: None)
-    assert voiceprint_path(cfg).exists()
-    assert json.loads(learned_path(cfg).read_text()) == ["hey mailo"]
-    assert len(scores) == len(LINES) and min(scores) > 0.99
+class FakeBot:
+    def __init__(self, hears=True):
+        self.hears, self.heard, self.calls = hears, 0, []
+
+    def __call__(self, method, path):
+        self.calls.append((method, path))
+        if path == "/enrol/status" and self.hears:
+            self.heard += 1
+        return {"active": self.heard < len(LINES), "heard": self.heard, "done": self.heard >= len(LINES),
+                "learned": ["hey mailo"]}
 
 
-def test_lines_use_the_configured_name():
-    assert sum("Hey {name}" in line for line in LINES) == 3
+def cfg(engine="parakeet"):
+    return Config(name="Milo", stt_engine=engine)
 
 
-def test_delete_removes_both_files_and_is_idempotent(tmp_path):
-    cfg = Config(data_dir=str(tmp_path))
-    voiceprint_path(cfg).write_bytes(b"x")
-    learned_path(cfg).write_text("[]")
-    delete(cfg)
-    delete(cfg)
-    assert not voiceprint_path(cfg).exists() and not learned_path(cfg).exists()
+def test_walks_the_lines_and_reports_what_it_learned():
+    said = []
+    bot = FakeBot()
+    assert run(cfg(), bot, say=said.append, sleep=lambda s: None) == 0
+    assert ("POST", "/enrol/start") in bot.calls
+    assert any('"Hey Milo"' in s for s in said) and any("hey mailo" in s for s in said)
+
+
+def test_bot_not_running_says_start_milo_first():
+    said = []
+    assert run(cfg(), lambda m, p: None, say=said.append, sleep=lambda s: None) == 1
+    assert any("start" in s.lower() for s in said)
+
+
+def test_nothing_heard_cancels_and_says_check_the_mic():
+    said = []
+    bot = FakeBot(hears=False)
+    assert run(cfg(), bot, say=said.append, sleep=lambda s: None) == 1
+    assert ("POST", "/enrol/cancel") in bot.calls and any("mic" in s for s in said)
+
+
+def test_nemotron_is_refused_before_calling_the_bot():
+    said = []
+    bot = FakeBot()
+    assert run(cfg("nemotron"), bot, say=said.append, sleep=lambda s: None) == 1
+    assert bot.calls == [] and any("parakeet" in s for s in said)
+
+
+def test_a_failure_in_the_bot_is_reported_at_once():
+    said = []
+    bot = FakeBot()
+    real = bot.__call__
+
+    def call(method, path):
+        st = real(method, path)
+        return {**st, "done": False, "error": "kokoro broke"} if st and st["heard"] >= len(LINES) else st
+    assert run(cfg(), call, say=said.append, sleep=lambda s: None) == 1
+    assert any("kokoro broke" in s for s in said)
