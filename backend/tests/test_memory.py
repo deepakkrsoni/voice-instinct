@@ -62,7 +62,7 @@ def test_forget_removes_the_fact_everywhere_but_keeps_structure(tmp_path):
     (m.root / "people/priya.md").write_text("# Priya\naliases: sister, vegetarian cook\n- 2026-10-15: vegetarian too\n"
                                             "- 2026-10-15: lives in Pune\n")
     m.journal("user", "remember that I'm vegetarian")
-    assert m.forget("Vegetarian") == 3  # notes, Priya's fact, the journal line; never the alias line
+    assert len(m.forget("Vegetarian")) == 3  # notes, Priya's fact, the journal line; never the alias line
     assert "vegetarian" not in m.context().lower()
     priya = (m.root / "people/priya.md").read_text()
     assert priya.startswith("# Priya\naliases: sister, vegetarian cook\n") and "Pune" in priya
@@ -73,7 +73,7 @@ def test_forget_removes_the_fact_everywhere_but_keeps_structure(tmp_path):
 def test_forget_refuses_text_too_short_to_be_safe(tmp_path):
     m = mem(tmp_path)
     m.remember("I'm vegetarian")
-    assert m.forget(" a ") == 0
+    assert m.forget(" a ") == []
     assert "vegetarian" in m.context()
 
 
@@ -114,7 +114,7 @@ def test_an_unusable_folder_turns_memory_off_without_raising(tmp_path):
     (tmp_path / "file").write_text("")
     m = Memory(tmp_path / "file" / "memory", zone="Asia/Kolkata")
     assert m.ensure() is False
-    assert m.context() == "" and m.recall("x") == "" and m.forget("something") == 0
+    assert m.context() == "" and m.recall("x") == "" and m.forget("something") == []
     m.remember("x")  # no exception
     m.journal("user", "x")
 
@@ -133,4 +133,48 @@ def test_the_tools_answer_nova(tmp_path):
     asyncio.run(forget(p, text="Priya"))
     assert got[0]["status"] == "remembered"
     assert "my sister is Priya" in got[1]["found"]
-    assert got[2] == {"status": "forgotten", "lines_removed": 1}
+    assert got[2] == {"status": "forgotten", "lines_removed": 1, "removed": ["notes.md: - 2026-10-16: my sister is Priya"]}
+
+
+def test_forget_matches_whole_words_and_refuses_common_words(tmp_path):
+    # Review: "forget that" passed through as "that" wiped unrelated facts, "India" the location line.
+    m = mem(tmp_path)
+    m.remember("likes that cafe near Indiranagar")
+    m.remember("Is vegetarian")
+    assert m.forget("that") == [] and m.forget("the") == [] and m.forget("my sister") == []
+    assert m.forget("Indira") == []  # inside a word: not a match
+    assert m.forget("vegetarian") == ["notes.md: - 2026-10-16: Is vegetarian"]
+    assert "Indiranagar" in m.context() and "Lives in India" in m.context()
+
+
+def test_a_git_failure_never_reaches_the_tool_call(tmp_path):
+    # Review: a stale index.lock (or the nightly commit) made remember raise, and Nova said the model was down.
+    m = mem(tmp_path)
+    (m.root / ".git/index.lock").write_text("")
+    m.remember("Is vegetarian")
+    assert "Is vegetarian" in m.context()  # saved; the next commit picks it up
+    assert len(m.forget("vegetarian")) == 1
+
+
+def test_git_hooks_in_the_memory_repo_never_run(tmp_path):
+    # The nightly run writes this folder from untrusted text: a planted hook must not run on our commits.
+    m = mem(tmp_path)
+    hook = m.root / ".git/hooks/pre-commit"
+    hook.write_text(f"#!/bin/sh\ntouch {tmp_path}/pwned\n")
+    hook.chmod(0o755)
+    m.remember("Is vegetarian")
+    assert not (tmp_path / "pwned").exists() and "remember" in log(m)
+
+
+def test_recall_matches_whole_words_only(tmp_path):
+    m = mem(tmp_path)
+    (m.root / "people").mkdir()
+    (m.root / "people/sandra.md").write_text("# Sandra\naliases: colleague\n- 2026-10-15: works at Infer\n")
+    assert m.recall("my sister and her plans") == ""
+
+
+def test_new_notes_survive_a_full_profile(tmp_path):
+    m = mem(tmp_path)
+    (m.root / "profile.md").write_text("# Profile\n" + "x" * CONTEXT_CAP)
+    m.remember("Is vegetarian")
+    assert "Is vegetarian" in m.context() and len(m.context()) <= CONTEXT_CAP

@@ -156,9 +156,19 @@ def test_the_nightly_run_writes_memory_but_has_no_network_or_web_and_no_secrets(
     from autonomy import consolidation_settings
     s = consolidation_settings(HOME, APP, DATA)
     rules = s["permissions"]["deny"]
-    assert not any("memory" in r for r in rules)  # its own folder, journal included
+    assert "Edit(~/.voice-instinct/memory/**)" not in rules  # its own folder, journal included
+    assert not any("memory/journal" in r for r in rules)
     assert "Read(~/.ssh/**)" in rules and "Read(~/.voice-instinct/harness.db)" in rules
     assert "WebFetch" in rules and "WebSearch" in rules
     assert s["sandbox"]["network"] == {"allowedDomains": [], "strictAllowlist": True}
     assert s["sandbox"]["enabled"] and s["sandbox"]["failIfUnavailable"]
     assert "~/.voice-instinct/memory/journal" not in s["sandbox"]["filesystem"]["denyRead"]
+
+
+def test_the_nightly_run_cannot_plant_code_that_runs_outside_its_sandbox():
+    # Its input holds web text: git hooks, its own next run's settings or a CLAUDE.md would all run or steer
+    # code later. .gitignore keeps the raw journal out of git history.
+    from autonomy import consolidation_settings
+    rules = consolidation_settings(HOME, APP, DATA)["permissions"]["deny"]
+    for p in (".git/**", ".claude/**", "CLAUDE.md", ".gitignore"):
+        assert f"Edit(~/.voice-instinct/memory/{p})" in rules, p

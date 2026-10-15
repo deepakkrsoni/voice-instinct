@@ -19,7 +19,7 @@ Not affiliated with Instinct.
   night it files the day's conversations into plain markdown in `~/.voice-instinct/memory/` (a git repo),
   one file per person, place or preference, and keeps `profile.md`, a short summary of you that every
   conversation and errand starts with. It starts out knowing your country from your timezone. You can read
-  and edit all of it.
+  and edit all of it. Installed before this? Re-run `./install.sh` to turn on the nightly run.
 - It is for errands, not coding or general computer tasks. Today that means research done on the web:
   finding and comparing flights, products, plans and prices, and answering questions about them.
 - It is a Linux desktop app. The tray menu needs a desktop with a system tray (on GNOME, the

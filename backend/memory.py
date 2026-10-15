@@ -17,7 +17,17 @@ from pipecat.adapters.schemas.direct_function import tool_options
 CONTEXT_CAP = 16000  # characters, about 4k tokens: Instinct's profile is ~4,250
 ZONEINFO = Path("/usr/share/zoneinfo")
 _KEEP = ("#", "aliases:", "links:")  # structure forget never removes
-_GIT = ["git", "-c", "user.name=voice-instinct", "-c", "user.email=voice-instinct@localhost"]
+# hooksPath: the nightly run writes this folder from untrusted text, so a planted .git/hooks file must never run.
+_GIT = ["git", "-c", "user.name=voice-instinct", "-c", "user.email=voice-instinct@localhost",
+        "-c", "core.hooksPath=/dev/null"]
+# Words that say nothing on their own: "forget that" must never wipe every line containing "that".
+_COMMON = set("""a an and are about as at be but by do for from had has have he her hers him his i if in is it its
+just me my mine of on or our she so that the their them they this those to was we were what when where which who
+why will with you your lives live like likes said says""".split())
+
+
+def _words(text):
+    return re.findall(r"[a-z0-9]+", text.lower())
 
 
 def country_of(zone, zoneinfo=ZONEINFO):
@@ -49,10 +59,17 @@ class Memory:
     def _git(self, *args):
         return subprocess.run([*_GIT, "-C", str(self.root), *args], capture_output=True, text=True, check=True)
 
-    def commit(self, message):
-        self._git("add", "-A")
-        if self._git("status", "--porcelain").stdout.strip():
-            self._git("commit", "-q", "-m", message)
+    def commit(self, message) -> bool:
+        """Never raises: a stale index.lock or a commit racing the nightly run's is logged, and the next commit
+        picks the change up. False: nothing was committed."""
+        try:
+            self._git("add", "-A")
+            if self._git("status", "--porcelain").stdout.strip():
+                self._git("commit", "-q", "-m", message)
+                return True
+        except (OSError, subprocess.CalledProcessError) as e:
+            logger.warning(f"memory not committed: {getattr(e, 'stderr', '') or e}")
+        return False
 
     def ensure(self) -> bool:
         """Create the folder, its repo and a first profile; never touches files that exist. False: memory is off."""
@@ -63,6 +80,7 @@ class Memory:
             (self.root / ".gitignore").exists() or (self.root / ".gitignore").write_text("journal/\n")
             profile = self.root / "profile.md"
             profile.exists() or profile.write_text(_seed(self.zone))
+            self._git("status", "--porcelain")  # a usable repo, or memory is off
             self.commit("profile: first start")
             self.ok = True
         except (OSError, subprocess.CalledProcessError) as e:
@@ -82,8 +100,8 @@ class Memory:
         """profile.md and today's notes, as they go into Nova's prompt and every errand's."""
         if not self.ok:
             return ""
-        notes = self._read("notes.md").strip()
-        text = self._read("profile.md").strip() + (f"\n\n# Noted recently\n{notes}" if notes else "")
+        notes = self._read("notes.md").strip()  # first, so a full profile never cuts off what was just remembered
+        text = (f"# Noted recently\n{notes}\n\n" if notes else "") + self._read("profile.md").strip()
         return text[:CONTEXT_CAP]
 
     def prompt_block(self, errand=False) -> str:
@@ -98,23 +116,33 @@ class Memory:
         if not self.ok:
             return
         fact = " ".join(fact.split())
-        with open(self.root / "notes.md", "a") as f:
-            f.write(f"- {self.now():%Y-%m-%d}: {fact}\n")
+        try:
+            with open(self.root / "notes.md", "a") as f:
+                f.write(f"- {self.now():%Y-%m-%d}: {fact}\n")
+        except OSError as e:
+            logger.warning(f"not remembered: {e}")
+            return
         self.commit(f"remember: {fact[:60]}")
 
-    def forget(self, text) -> int:
-        """Remove every line containing text from every file, the journal too (so the nightly run cannot learn
-        it again). It stays in git history, so a mistake can be undone."""
-        needle = text.strip().lower()
-        if not self.ok or len(needle) < 3:
-            return 0
-        removed = 0
+    def forget(self, text) -> list[str]:
+        """Remove every line containing the phrase as whole words from every file, the journal too (so the
+        nightly run cannot learn it again), and return them. A phrase of only common words ("that", "my
+        sister") is refused. It stays in git history, so a mistake can be undone."""
+        words = _words(text)
+        if not self.ok or len(" ".join(words)) < 3 or all(w in _COMMON for w in words):
+            return []
+        pattern = re.compile(r"\b" + r"\W+".join(map(re.escape, words)) + r"\b", re.IGNORECASE)
+        removed = []
         for p in self._files(journal=True):
-            lines = p.read_text().splitlines(keepends=True)
-            kept = [l for l in lines if l.lstrip().lower().startswith(_KEEP) or needle not in l.lower()]
-            if len(kept) != len(lines):
-                removed += len(lines) - len(kept)
-                p.write_text("".join(kept))
+            try:
+                lines = p.read_text().splitlines(keepends=True)
+                kept = [l for l in lines if l.lstrip().lower().startswith(_KEEP) or not pattern.search(l)]
+                if len(kept) != len(lines):
+                    rel = p.relative_to(self.root).as_posix()
+                    removed += [f"{rel}: {l.strip()}" for l in lines if l not in kept]
+                    p.write_text("".join(kept))
+            except OSError as e:
+                logger.warning(f"forget: {p} not changed: {e}")
         if removed:
             self.commit("forget: a fact the user asked to forget")  # the message must not repeat it
         return removed
@@ -123,16 +151,16 @@ class Memory:
         """Matching facts, best first: a word matching a file's name or aliases returns that whole file."""
         if not self.ok:
             return ""
-        words = {w for w in re.findall(r"[a-z0-9]+", query.lower()) if len(w) >= 3}
+        words = {w for w in _words(query) if len(w) >= 3 and w not in _COMMON}
         hits = []
         for p in self._files():
             rel, lines = p.relative_to(self.root).as_posix(), p.read_text().splitlines()
-            head = " ".join([p.stem.lower(), *(l.lower() for l in lines if l.lower().startswith(("# ", "aliases:")))])
-            named = sum(w in head for w in words)
+            head = set(_words(" ".join([p.stem, *(l for l in lines if l.lower().startswith(("# ", "aliases:")))])))
+            named = len(words & head)
             for line in lines:
                 if not line.strip() or line.lstrip().lower().startswith(_KEEP):  # facts only, not file structure
                     continue
-                score = 2 * named + sum(w in line.lower() for w in words)
+                score = 2 * named + len(words & set(_words(line)))
                 if score:
                     hits.append((-score, rel, line))
         out, size = [], 0
@@ -180,9 +208,9 @@ def make_memory_tools(memory):
         Args:
             text: A short phrase that the facts to delete contain, e.g. "vegetarian" or "Priya".
         """
-        n = memory.forget(text)
-        await params.result_callback({"status": "forgotten", "lines_removed": n} if memory.ok
-                                     else {"status": "memory is unavailable"})
+        removed = memory.forget(text)  # read back what went, so a wrong guess at the phrase is heard
+        await params.result_callback({"status": "forgotten", "lines_removed": len(removed), "removed": removed[:5]}
+                                     if memory.ok else {"status": "memory is unavailable"})
 
     @tool_options(cancel_on_interruption=False)
     async def recall(params, query: str):

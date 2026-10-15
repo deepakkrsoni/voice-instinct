@@ -81,3 +81,23 @@ def test_nothing_new_means_no_run(tmp_path):
     (m.root / ".consolidated").write_text("2026-10-01\n2026-10-14\n2026-10-15\n")
     assert asyncio.run(consolidate(m, fake_claude(tmp_path, "exit 1\n"), TODAY)) is True
     assert not os.path.exists(tmp_path / "args")
+
+
+def test_hand_edits_survive_a_failed_run(tmp_path):
+    m = mem(tmp_path)
+    m.remember("Is vegetarian")
+    (m.root / "profile.md").write_text("# Profile\n- edited by hand\n")
+    (m.root / "people").mkdir()
+    (m.root / "people/mum.md").write_text("# Mum\n- added by hand\n")
+    assert asyncio.run(consolidate(m, fake_claude(tmp_path, FAIL), TODAY)) is False
+    assert (m.root / "profile.md").read_text() == "# Profile\n- edited by hand\n"
+    assert (m.root / "people/mum.md").exists() and not (m.root / "people/half.md").exists()
+
+
+def test_notes_are_kept_when_the_run_filed_nothing(tmp_path):
+    m = mem(tmp_path)
+    m.remember("Is vegetarian")
+    idle = 'echo \'{"type":"result","is_error":false,"result":"nothing to do"}\'\n'
+    assert asyncio.run(consolidate(m, fake_claude(tmp_path, idle), TODAY)) is True
+    assert "Is vegetarian" in (m.root / "notes.md").read_text()
+    assert pending(m, TODAY) == []  # the journal day itself is done

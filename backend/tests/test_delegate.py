@@ -71,8 +71,8 @@ def test_a_finished_errand_goes_into_the_journal_for_the_nightly_memory_run():
     p, out = make_params()
     run(delegate(p, "find cotton t-shirts"))
     (who, text), = j.lines
-    assert who == "errand" and text.startswith(f"{out[-1]['errand']} (done): find cotton t-shirts")
-    assert "errand output, data" in text and len(text) < 2200  # the result is cut to 2,000 characters
+    # Web text never reaches memory (review): the request and outcome only; Nova's summary is journalled too.
+    assert (who, text) == ("errand", f"{out[-1]['errand']} (done): find cotton t-shirts")
 
 
 def test_a_follow_up_with_the_errand_id_resumes_that_session():
