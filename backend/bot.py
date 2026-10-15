@@ -1,6 +1,7 @@
 """Voice agent: Parakeet (local) -> Gemini Flash -> Kokoro (local). Run: uv run bot.py"""
 
 import logging
+from contextlib import asynccontextmanager
 import os
 import sys
 from pathlib import Path
@@ -38,6 +39,7 @@ from pipecat.transports.base_transport import TransportParams
 from pipecat.utils.text.markdown_text_filter import MarkdownTextFilter
 from pipecat.workers.runner import WorkerRunner
 from registry import Registry
+from reminders import Reminders, make_reminder_tools
 from relay import Relay, make_bridge_tools, start_session
 from services import build_llm, kokoro_paths, make_stt
 from shutdown import cancel_on_exit
@@ -74,7 +76,20 @@ ENROLMENT = Enrolment(cfg, VOICEPRINT, embed=VOICEPRINT.embed,
                       on_learned=lambda phrases: [w.add_phrases(phrases) for w in list(WAKES)],
                       on_deleted=lambda learned: [w.remove_phrases(learned) for w in list(WAKES)])
 # Debug mode (config [debug] browser_steps): every errand browser step screenshotted (steps.py).
-STEPS = StepHub(Path.home(), telegram=Telegram.from_env()) if cfg.debug_browser_steps else None
+TELEGRAM = Telegram.from_env()  # None until TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are set
+STEPS = StepHub(Path.home(), telegram=TELEGRAM) if cfg.debug_browser_steps else None
+REMINDERS = Reminders(registry, relay, TELEGRAM)  # #4: one loop for the server, not per session
+_server_lifespan = app.router.lifespan_context
+
+
+@asynccontextmanager
+async def _with_reminders(a):  # chained like the runner's own lifespans (pipecat.runner.run._add_lifespan_to_app)
+    async with _server_lifespan(a):
+        REMINDERS.start()
+        yield
+
+
+app.router.lifespan_context = _with_reminders
 # Documented extension point (Running Bots Locally > Adding your own routes): the runner exports
 # its FastAPI app, so hooks share the voice page's process, event loop and port.
 BUDGET = TimeBudget(min_notice=cfg.permission_timeout + 30)  # errands are told when nearly out of time
@@ -105,6 +120,7 @@ SYSTEM_PROMPT = (
     "ask the user, then call answer_question after they answer. Use list_sessions to answer what "
     "you are working on and stop_session to stop one. "
     "You have no clock: for the time or date, or anything that depends on today, call current_time. "
+    "For reminders, call current_time first, then set_reminder with the exact local time. "
     "Whenever the user signals they are done for now, in any words (bye, bye bye, goodbye, stop, stop for "
     "now, that's all, thanks that's it, go away, later), say one short goodbye and call dismiss: "
     "that ends the conversation and never stops an errand. Use stop_session only when they ask to stop "
@@ -154,7 +170,7 @@ async def bot(runner_args: RunnerArguments):
     # As Siri does: only a wake phrase said while asleep is voice-checked (#32)
     stt = make_stt(cfg, voiceprint=VOICEPRINT, enrolment=ENROLMENT, needs_check=wake.would_wake)
 
-    tools = [make_dismiss(wake), current_time]  # these work with or without Claude
+    tools = [make_dismiss(wake), current_time, *make_reminder_tools(registry, TELEGRAM)]  # with or without Claude
     if backend.available():
         autonomy = sandbox_settings(Path.home(), REPO_ROOT, DATA, hook_port=HOOK_PORT)
         settings_for = lambda sid, debug_cwd=None: write_run_settings(
