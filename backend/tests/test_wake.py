@@ -176,7 +176,7 @@ async def _ready_wake():
     return w
 
 
-def test_dismiss_sleeps_after_the_goodbye_line_and_a_reply_cannot_wake_it_again():
+def test_dismiss_sleeps_after_the_goodbye_and_a_later_reply_wakes_it():
     async def go():
         w = await _ready_wake()
         results = []
@@ -189,12 +189,8 @@ def test_dismiss_sleeps_after_the_goodbye_line_and_a_reply_cannot_wake_it_again(
         assert w.awake  # awake until it finishes
         w.assistant_turn_done()
         assert not w.awake
-        w.wake("reply")  # a late reply after the goodbye
-        assert not w.awake
-        w.wake("shown")  # the tray (or the wake phrase) still works
+        w.wake("reply")  # an errand's result after the goodbye: show the orb again
         assert w.awake
-        w.assistant_turn_done()
-        assert w.awake  # an ordinary turn end keeps it awake again
         await w.cleanup()
     asyncio.run(go())
 
@@ -216,3 +212,8 @@ def test_assistant_turn_done_keeps_awake_when_not_dismissing():
         assert w.awake
         await w.cleanup()
     asyncio.run(go())
+
+
+def test_learned_phrases_wake_it_once_added():
+    users, _, sent, _ = asyncio.run(converse(["Hey Mailo, hello"], early=lambda w: w.add_phrases(["hey mailo"])))
+    assert users == ["Hey Mailo, hello"] and sent[0] == {"type": "wake", "reason": "phrase"}

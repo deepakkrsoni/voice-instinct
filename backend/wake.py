@@ -1,11 +1,13 @@
 """Wake phrase gate: Pipecat's documented WakePhraseUserTurnStartStrategy, plus programmatic wake.
 
 `wake()` and `keep_awake()` are ours: the strategy has no public way to wake from code, so they call
-its private `_transition_to_awake` / `_refresh_timeout`, and `hold` overrides `_transition_to_idle`
+its private `_transition_to_awake` / `_refresh_timeout`, `add_phrases` extends its `_phrases` / `_patterns`,
+and `hold` overrides `_transition_to_idle`
 (all pinned by tests against Pipecat 1.12).
 """
 
 import asyncio
+import re
 
 from loguru import logger
 
@@ -21,7 +23,6 @@ class ProgrammaticWake(WakePhraseUserTurnStartStrategy):
         self._hold = hold  # while it returns True (a question waits for an answer), never fall asleep
         self._early_wake = None
         self._dismissing = None  # a timer while a dismissal waits for the goodbye line (#32)
-        self._dismissed = False  # after one: a reply must not show the orb again
 
     async def setup(self, setup):
         await super().setup(setup)
@@ -37,14 +38,10 @@ class ProgrammaticWake(WakePhraseUserTurnStartStrategy):
     def awake(self) -> bool:
         return self.state == _WakeState.AWAKE
 
-    def _transition_to_awake(self, reason):
-        self._dismissed = False  # the wake phrase, the tray or a question: listening again
-        super()._transition_to_awake(reason)
-
     def wake(self, reason: str = "question") -> None:
         """Wake without the phrase (for example to hear the reply to a Claude question)."""
-        if reason == "reply" and (self._dismissing or self._dismissed):
-            return  # the goodbye line, or a late reply after it: stay dismissed
+        if reason == "reply" and self._dismissing:
+            return  # the goodbye line itself: stay dismissed
         if self._timeout_task is None:  # not set up yet (a reconnect with a question open)
             self._early_wake = reason
         elif not self.awake:
@@ -60,6 +57,14 @@ class ProgrammaticWake(WakePhraseUserTurnStartStrategy):
         if self.awake:
             self._refresh_timeout()
 
+    def add_phrases(self, phrases) -> None:
+        """More wake phrases (learned at enrolment), compiled like the strategy's own in __init__."""
+        for phrase in phrases:
+            if phrase not in self._phrases:
+                self._phrases.append(phrase)
+                self._patterns.append(re.compile(
+                    r"\b" + r"\s*".join(re.escape(w) for w in phrase.split()) + r"\b", re.IGNORECASE))
+
     def dismiss(self, grace: float = 5.0) -> None:
         """The user said stop: sleep when the goodbye line ends, or after `grace` if none comes."""
         self._cancel_dismiss()
@@ -74,7 +79,6 @@ class ProgrammaticWake(WakePhraseUserTurnStartStrategy):
 
     def _finish_dismiss(self):
         self._cancel_dismiss()
-        self._dismissed = True
         self.sleep()
 
     def _cancel_dismiss(self):
