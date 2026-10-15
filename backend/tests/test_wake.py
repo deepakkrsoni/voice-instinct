@@ -159,3 +159,60 @@ def test_hiding_the_orb_by_hand_puts_it_to_sleep_even_with_a_question_open():
 
     users, _, sent, wake = asyncio.run(converse(["what's on today"], hold=lambda: True, before=shown_then_hidden))
     assert users == [] and {"type": "sleep"} in sent and not wake.awake
+
+
+from pipecat.utils.asyncio.task_manager import TaskManager
+from wake import make_dismiss
+
+
+async def _ready_wake():
+    """A wake strategy set up outside a pipeline, awake as if the orb was shown."""
+    async def send(m):
+        pass
+    tm = TaskManager(loop=asyncio.get_running_loop())
+    w = make_wake(["hey milo"], 30, send)
+    await w.setup(SimpleNamespace(task_manager=tm))
+    w.wake("shown")
+    return w
+
+
+def test_dismiss_sleeps_after_the_goodbye_line_and_a_reply_cannot_wake_it_again():
+    async def go():
+        w = await _ready_wake()
+        results = []
+
+        async def cb(result, *, properties=None):
+            results.append(properties)
+        await make_dismiss(w)(SimpleNamespace(result_callback=cb))
+        assert results[0].run_llm is False  # no second response that would wake the orb again
+        w.wake("reply")  # the goodbye line starting
+        assert w.awake  # awake until it finishes
+        w.assistant_turn_done()
+        assert not w.awake
+        w.wake("reply")  # a late reply after the goodbye
+        assert not w.awake
+        w.wake("shown")  # the tray (or the wake phrase) still works
+        assert w.awake
+        w.assistant_turn_done()
+        assert w.awake  # an ordinary turn end keeps it awake again
+        await w.cleanup()
+    asyncio.run(go())
+
+
+def test_dismiss_without_a_goodbye_sleeps_after_grace():
+    async def go():
+        w = await _ready_wake()
+        w.dismiss(grace=0.1)
+        await asyncio.sleep(0.2)
+        assert not w.awake
+        await w.cleanup()
+    asyncio.run(go())
+
+
+def test_assistant_turn_done_keeps_awake_when_not_dismissing():
+    async def go():
+        w = await _ready_wake()
+        w.assistant_turn_done()
+        assert w.awake
+        await w.cleanup()
+    asyncio.run(go())

@@ -5,8 +5,12 @@ its private `_transition_to_awake` / `_refresh_timeout`, and `hold` overrides `_
 (all pinned by tests against Pipecat 1.12).
 """
 
+import asyncio
+
 from loguru import logger
 
+from pipecat.adapters.schemas.direct_function import tool_options
+from pipecat.frames.frames import FunctionCallResultProperties
 from pipecat.turns.user_start import WakePhraseUserTurnStartStrategy
 from pipecat.turns.user_start.wake_phrase_user_turn_start_strategy import _WakeState
 
@@ -16,6 +20,8 @@ class ProgrammaticWake(WakePhraseUserTurnStartStrategy):
         super().__init__(**kwargs)
         self._hold = hold  # while it returns True (a question waits for an answer), never fall asleep
         self._early_wake = None
+        self._dismissing = None  # a timer while a dismissal waits for the goodbye line (#32)
+        self._dismissed = False  # after one: a reply must not show the orb again
 
     async def setup(self, setup):
         await super().setup(setup)
@@ -31,8 +37,14 @@ class ProgrammaticWake(WakePhraseUserTurnStartStrategy):
     def awake(self) -> bool:
         return self.state == _WakeState.AWAKE
 
+    def _transition_to_awake(self, reason):
+        self._dismissed = False  # the wake phrase, the tray or a question: listening again
+        super()._transition_to_awake(reason)
+
     def wake(self, reason: str = "question") -> None:
         """Wake without the phrase (for example to hear the reply to a Claude question)."""
+        if reason == "reply" and (self._dismissing or self._dismissed):
+            return  # the goodbye line, or a late reply after it: stay dismissed
         if self._timeout_task is None:  # not set up yet (a reconnect with a question open)
             self._early_wake = reason
         elif not self.awake:
@@ -47,6 +59,28 @@ class ProgrammaticWake(WakePhraseUserTurnStartStrategy):
         """Restart the awake window, e.g. when the bot finishes speaking, so the user can reply."""
         if self.awake:
             self._refresh_timeout()
+
+    def dismiss(self, grace: float = 5.0) -> None:
+        """The user said stop: sleep when the goodbye line ends, or after `grace` if none comes."""
+        self._cancel_dismiss()
+        self._dismissing = asyncio.get_running_loop().call_later(grace, self._finish_dismiss)
+
+    def assistant_turn_done(self) -> None:
+        """Milo finished speaking: sleep if dismissed, otherwise give the user time to reply."""
+        if self._dismissing:
+            self._finish_dismiss()
+        else:
+            self.keep_awake()
+
+    def _finish_dismiss(self):
+        self._cancel_dismiss()
+        self._dismissed = True
+        self.sleep()
+
+    def _cancel_dismiss(self):
+        if self._dismissing:
+            self._dismissing.cancel()
+            self._dismissing = None
 
 
 def make_wake(phrases, timeout, send, hold=lambda: False) -> ProgrammaticWake:
@@ -63,6 +97,17 @@ def make_wake(phrases, timeout, send, hold=lambda: False) -> ProgrammaticWake:
         await send({"type": "sleep"})
 
     return w
+
+
+def make_dismiss(wake: ProgrammaticWake):
+    @tool_options(cancel_on_interruption=False)
+    async def dismiss(params):
+        """End the conversation and hide when the user says stop, that's all, go away or similar.
+        First say one short goodbye line. Running errands keep running; this never stops one."""
+        wake.dismiss()
+        await params.result_callback({"status": "dismissed"},
+                                     properties=FunctionCallResultProperties(run_llm=False))
+    return dismiss
 
 
 def handle_client_message(wake: ProgrammaticWake, msg) -> None:
