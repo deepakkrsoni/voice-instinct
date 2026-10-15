@@ -21,6 +21,8 @@ COHORT_VOICES = ("am_adam", "am_michael", "bf_emma", "af_bella", "bm_george", "a
                  "bm_lewis", "hf_alpha", "hm_omega", "hf_beta", "hm_psi")  # Kokoro; spike 2's cohort
 WAKE_PREFIXES = ("hey", "hay", "okay", "ok", "o k")  # as Config.wake_phrases, plus Parakeet's "O K"
 FRAME = 320  # 20 ms
+SPEECH_RELATIVE = 0.1  # -20 dB from the loudest frame; at the owner's level (~0.15) the same as spike 2's fixed 0.02
+SPEECH_FLOOR = 0.003  # a clip that never gets louder than this has no speech in it
 
 
 def voiceprint_path(cfg) -> Path:
@@ -36,12 +38,15 @@ def speaker_model_path(cfg) -> Path:
 
 
 def speech_only(pcm: bytes) -> np.ndarray:
-    """The 20 ms frames above RMS 0.02, plus 2 each side. Orb audio is noise suppressed: silence is ~0.0005."""
-    # ponytail: fixed energy gate tuned on the orb's audio; a raw (unsuppressed) mic needs Silero instead.
+    """The 20 ms frames within 20 dB of the clip's loudest, plus 2 each side. Relative, so a quiet mic or a
+    soft voice works; the floor drops near silence (the orb's noise-suppressed silence is ~0.0005)."""
     x = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
     n = len(x) // FRAME
     f = x[: n * FRAME].reshape(n, FRAME)
-    keep = np.convolve(np.sqrt((f**2).mean(1)) > 0.02, np.ones(5), "same") > 0
+    rms = np.sqrt((f**2).mean(1))
+    if not n or rms.max() < SPEECH_FLOOR:
+        return np.zeros(0, dtype=np.float32)
+    keep = np.convolve(rms > rms.max() * SPEECH_RELATIVE, np.ones(5), "same") > 0
     return f[keep].ravel()
 
 

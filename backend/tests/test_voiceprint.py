@@ -151,3 +151,15 @@ def test_once_enrolled_the_name_alone_and_its_merged_forms_wake_it():
 ])
 def test_learn_spellings_from_the_part_before_the_request(said, kept):
     assert learn_spellings([said], "Milo") == kept
+
+
+def test_quiet_speech_counts_relative_to_its_own_loudest_moment():
+    # a quiet mic or a soft voice: speech at 0.01 was below the old fixed 0.02 and judged "too little speech"
+    silence = np.zeros(16000, dtype=np.int16).tobytes()
+    x = speech_only(silence + pcm(0.5, level=0.01) + silence)
+    assert 0.5 <= len(x) / 16000 <= 0.6
+    assert vp().is_owner(pcm(1.0, level=0.01))
+
+
+def test_near_silence_is_still_not_speech():
+    assert len(speech_only(pcm(1.0, level=0.001))) == 0
