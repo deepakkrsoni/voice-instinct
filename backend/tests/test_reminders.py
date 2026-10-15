@@ -1,3 +1,4 @@
+import pytest
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -132,3 +133,67 @@ def test_a_cancelled_reminder_never_fires():
     reg.cancel_reminder(reg.add_reminder("x", now[0], "none"))
     tick(r)
     assert relay.said == [] and tg.sent == []
+
+
+from types import SimpleNamespace
+
+from reminders import make_reminder_tools
+
+
+def call(tool, **kw):
+    got = []
+
+    async def cb(result, **_):
+        got.append(result)
+    asyncio.run(tool(SimpleNamespace(result_callback=cb), **kw))
+    return got[0]
+
+
+def tools(now, tg=True):
+    reg = Registry(clock=lambda: now)
+    t = FakeTelegram() if tg else None
+    return reg, t, {f.__name__: f for f in make_reminder_tools(reg, t, clock=lambda: now, tz=IN)}
+
+
+def test_set_list_cancel():
+    now = ts(2026, 10, 16, 1, 0, IN)
+    reg, _, t = tools(now)
+    r = call(t["set_reminder"], what="call mom", at="2026-10-16T15:00")
+    assert r["status"] == "set" and r["when"] == "3:00 pm"
+    listed = call(t["list_reminders"])["reminders"]
+    assert listed[0]["what"] == "call mom" and listed[0]["id"] == r["id"]
+    assert call(t["cancel_reminder"], reminder_id=r["id"])["status"] == "cancelled"
+    assert call(t["list_reminders"])["reminders"] == []
+
+
+@pytest.mark.parametrize("kw", [
+    {"what": "x", "at": "2026-10-16T00:30"},           # one-off in the past
+    {"what": "x", "at": "tomorrow-ish"},               # not a time
+    {"what": "x", "at": "2026-10-16T15:00", "repeat": "hourly"},
+    {"what": " ", "at": "2026-10-16T15:00"},
+])
+def test_bad_reminders_are_refused(kw):
+    _, _, t = tools(ts(2026, 10, 16, 1, 0, IN))
+    assert call(t["set_reminder"], **kw)["status"] == "refused"
+
+
+def test_a_daily_reminder_may_start_in_the_past_and_rolls_forward():
+    now = ts(2026, 10, 16, 10, 0, IN)
+    _, _, t = tools(now)
+    r = call(t["set_reminder"], what="water", at="2026-10-16T09:00", repeat="daily")
+    assert r["status"] == "set" and r["when"] == "tomorrow at 9:00 am"
+
+
+def test_send_telegram_only_with_config():
+    now = ts(2026, 10, 16, 1, 0, IN)
+    _, tg, t = tools(now)
+    assert call(t["send_telegram"], text="hi")["status"] == "sent" and tg.sent == ["hi"]
+    _, _, t2 = tools(now, tg=False)
+    assert call(t2["send_telegram"], text="hi")["status"] == "not_configured"
+
+
+def test_the_tools_build_valid_schemas():
+    from pipecat.processors.aggregators.llm_context import LLMContext
+    names = {s.name for s in LLMContext._normalize_and_validate_tools(
+        make_reminder_tools(Registry(), None)).standard_tools}
+    assert names == {"set_reminder", "list_reminders", "cancel_reminder", "send_telegram"}

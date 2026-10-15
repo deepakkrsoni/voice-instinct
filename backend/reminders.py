@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from loguru import logger
+from pipecat.adapters.schemas.direct_function import tool_options
 
 from clock import _zone
 
@@ -104,3 +105,63 @@ class Reminders:
     def start(self):
         if self._task is None:
             self._task = asyncio.get_running_loop().create_task(self.run())
+
+
+def make_reminder_tools(registry, telegram, clock=time.time, tz=None):
+    tz = tz or local_zone()
+
+    @tool_options(cancel_on_interruption=False)
+    async def set_reminder(params, what: str, at: str, repeat: str = "none"):
+        """Set a reminder. Call current_time first, then pass the exact local time.
+
+        Args:
+            what: What to remind the user about, in a few words ("call mom").
+            at: Local date and time, ISO 8601, e.g. "2026-10-16T15:00".
+            repeat: "none", "daily" or "weekly".
+        """
+        now = clock()
+        try:
+            t = datetime.fromisoformat(at)
+        except ValueError:
+            return await params.result_callback({"status": "refused", "reason": "at is not a date and time"})
+        due = (t if t.tzinfo else t.replace(tzinfo=tz)).timestamp()
+        if not what.strip() or repeat not in REPEATS:
+            return await params.result_callback({"status": "refused", "reason": "need what, and repeat none/daily/weekly"})
+        if due <= now:
+            if repeat == "none":
+                return await params.result_callback({"status": "refused", "reason": "that time has passed; ask the user"})
+            due = next_due(due, repeat, now, tz)
+        rid = registry.add_reminder(what.strip(), due, repeat)
+        await params.result_callback({"status": "set", "id": rid, "when": spoken_time(due, tz, now), "repeat": repeat})
+
+    @tool_options(cancel_on_interruption=False)
+    async def list_reminders(params):
+        """List the user's pending reminders, soonest first."""
+        now = clock()
+        await params.result_callback({"reminders": [
+            {"id": r["id"], "what": r["text"], "when": spoken_time(r["due"], tz, now), "repeat": r["repeat"]}
+            for r in registry.pending_reminders()]})
+
+    @tool_options(cancel_on_interruption=False)
+    async def cancel_reminder(params, reminder_id: int):
+        """Cancel one pending reminder. Use list_reminders to find its id.
+
+        Args:
+            reminder_id: The id from list_reminders.
+        """
+        ok = registry.cancel_reminder(int(reminder_id))
+        await params.result_callback({"status": "cancelled" if ok else "no_such_reminder"})
+
+    @tool_options(cancel_on_interruption=False)
+    async def send_telegram(params, text: str):
+        """Send the user a Telegram message (only ever to them), e.g. an address or a list they asked for.
+
+        Args:
+            text: The message.
+        """
+        if telegram is None:
+            return await params.result_callback({"status": "not_configured"})
+        ok = await telegram.send_message(text)
+        await params.result_callback({"status": "sent" if ok else "failed"})
+
+    return [set_reminder, list_reminders, cancel_reminder, send_telegram]
