@@ -111,3 +111,31 @@ def test_a_segment_is_cut_once_it_reaches_the_cap_even_without_a_pause():
 
 def test_the_default_cap_matches_nemotrons_longest_utterance():
     assert ParakeetSTTService.MAX_SEGMENT_SECS == 20
+
+
+class FakePrint:
+    def __init__(self, owner):
+        self.owner, self.checked = owner, 0
+
+    def is_owner(self, pcm, rate=16000):
+        self.checked += 1
+        return self.owner
+
+
+def run_checked(owner):
+    rec, vp = FakeOffline(), FakePrint(owner)
+    stt = ParakeetSTTService(recognizer=rec, voiceprint=vp)
+    stt.PAUSE_SECS = 0.05
+    down, _ = asyncio.run(run_test(stt, frames_to_send=[
+        VADUserStartedSpeakingFrame(), *speech(), VADUserStoppedSpeakingFrame(), SleepFrame(sleep=0.3)]))
+    return rec.segments, vp.checked, [f for f in down if isinstance(f, TranscriptionFrame)]
+
+
+def test_the_owners_segment_is_transcribed():
+    segments, checked, finals = run_checked(True)
+    assert checked == 1 and len(segments) == 1 and len(finals) == 1
+
+
+def test_someone_elses_segment_is_never_decoded_or_sent():
+    segments, checked, finals = run_checked(False)
+    assert checked == 1 and segments == [] and finals == []

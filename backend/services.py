@@ -75,7 +75,7 @@ class ParakeetSTTService(SegmentedSTTService):
     # cache-aware model if STT latency dominates.
     wants_wav_segments = False
 
-    def __init__(self, model_dir: Path | None = None, recognizer=None, **kwargs):
+    def __init__(self, model_dir: Path | None = None, recognizer=None, voiceprint=None, **kwargs):
         super().__init__(
             sample_rate=16000,
             ttfs_p99_latency=1.3,  # the 0.8 s pause plus decoding
@@ -84,6 +84,7 @@ class ParakeetSTTService(SegmentedSTTService):
         )
         self._rec = recognizer or _load_recognizer(model_dir)
         self._cut = None
+        self._voiceprint = voiceprint  # #32: only the owner's segments are decoded
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -151,6 +152,9 @@ class ParakeetSTTService(SegmentedSTTService):
         return stream.result.text.strip()
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+        # Checked before decoding: someone else's speech is never even transcribed (#32).
+        if self._voiceprint is not None and not await asyncio.to_thread(self._voiceprint.is_owner, audio):
+            return
         await self.start_processing_metrics()
         text = await asyncio.to_thread(self._decode, audio)
         await self.stop_processing_metrics()
@@ -239,13 +243,13 @@ def stt_dir(cfg) -> Path:
     return Path(cfg.models_dir).expanduser() / STT_MODELS[cfg.stt_engine]
 
 
-def make_stt(cfg, recognizer=None):
-    """The configured speech-to-text service. recognizer: a fake for tests."""
+def make_stt(cfg, recognizer=None, voiceprint=None):
+    """The configured speech-to-text service. recognizer: a fake for tests. voiceprint: Parakeet only (#32)."""
     d = stt_dir(cfg)
     if recognizer is None and not d.is_dir():
         raise RuntimeError(f"The {cfg.stt_engine} speech model is not installed ({d}). Run ./install.sh.")
     if cfg.stt_engine == "parakeet":
-        return ParakeetSTTService(model_dir=d, recognizer=recognizer)
+        return ParakeetSTTService(model_dir=d, recognizer=recognizer, voiceprint=voiceprint)
     return NemotronSTTService(model_dir=d, recognizer=recognizer,
                               language=Language.EN if cfg.stt_engine == "nemotron" else None)
 
