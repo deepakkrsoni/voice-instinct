@@ -26,7 +26,7 @@ def make(tmp_path, clock=None):
 def test_five_segments_make_a_live_voiceprint_and_learned_spellings(tmp_path):
     e, vp, learned = make(tmp_path)
     e.start()
-    for text in ["Hey Milo, a.", "Hey Mailo, b.", "Hey my luck, c.", "Hey Milo, d.", "Hey Milo, e."]:
+    for text in [line.format(name=n) for line, n in zip(LINES, ["Milo", "Hey Mailo", "Hey my luck", "Milo", "Milo"])]:
         e.offer(speech(), text)
     assert not e.active and e.status() == {"active": False, "heard": 5, "done": True, "learned": ["hey mailo"],
                                          "error": None, "rejected": 0}
@@ -58,8 +58,8 @@ def test_routes_need_the_token_and_delete_turns_the_check_off(tmp_path):
     assert c.post("/enrol/start", headers={"X-Voice-Token": "nope"}).status_code == 403
     h = {"X-Voice-Token": "tok"}
     assert c.post("/enrol/start", headers=h).json()["active"] is True
-    for _ in LINES:
-        e.offer(speech(), "Hey Milo")
+    for line in LINES:
+        e.offer(speech(), line.format(name="Milo"))
     assert c.get("/enrol/status", headers=h).json()["done"] is True and vp.enrolled
     assert c.post("/enrol/delete", headers=h).status_code == 200
     assert not vp.enrolled and not voiceprint_path(e.cfg).exists()
@@ -76,8 +76,8 @@ def test_a_failure_building_the_voiceprint_is_logged_not_raised(tmp_path):
     e, vp, _ = make(tmp_path)
     e._cohort = lambda: (_ for _ in ()).throw(RuntimeError("kokoro broke"))
     e.start()
-    for _ in LINES:
-        e.offer(speech(), "Hey Milo")  # must not raise into the STT
+    for line in LINES:
+        e.offer(speech(), line.format(name="Milo"))  # must not raise into the STT
     assert not vp.enrolled and e.status()["done"] is False and e.status()["error"]
 
 
@@ -104,21 +104,22 @@ def test_delete_tells_the_bot_which_phrases_to_drop(tmp_path):
 
 
 
-def test_a_take_must_be_heard_as_the_wake_phrase(tmp_path):
+def test_a_take_must_be_heard_as_the_line_it_was_asked_for(tmp_path):
     # a cough, another voice or a relay note must not go into the voiceprint
     e, _, _ = make(tmp_path)
     e.start()
-    for text in ["", "A little bit", "You know what?"]:
+    for text in ["", "A little bit", "Okay sure."]:
         e.offer(speech(), text)
     assert e.status()["heard"] == 0 and e.status()["rejected"] == 3
-    for text in ["Hey Mailo, what time is it?", "Okay Milo, hi", "Milo, what's on today?"]:
-        e.offer(speech(), text)
-    assert e.status()["heard"] == 3
+    # the name misheard ("Nova" as "No") is fine: the rest of the line was heard
+    e.offer(speech(), "No. What time is it?")
+    e.offer(speech(), "Mailo, what's the weather tomorrow?")
+    assert e.status()["heard"] == 2
 
 
 def test_spellings_are_learned_from_every_line(tmp_path):
     e, _, learned = make(tmp_path)
     e.start()
-    for text in ["Hey Milo, a.", "Hey Milo, b.", "Hey Milo, c.", "Hey Mailo, d.", "Hey Mylo, e."]:
+    for text in [line.format(name=n) for line, n in zip(LINES, ["Milo", "Milo", "Milo", "Hey Mailo", "Hey Mylo"])]:
         e.offer(speech(), text)
     assert e.status()["learned"] == ["hey mailo", "hey mylo"]  # lines 4 and 5 count too

@@ -12,7 +12,7 @@ from fastapi import APIRouter, Header, HTTPException
 from loguru import logger
 
 from voiceprint import (MIN_SPEECH_SECS, build_vector, delete_voiceprint, learn_spellings, learned_path,
-                        WAKE_PREFIXES, learned_wake_phrases, save_voiceprint, speech_only)
+                        learned_wake_phrases, save_voiceprint, speech_only)
 
 # The name with a short request, as the owner wakes it (#32): "Nova" alone is heard right, where "Hey Nova" came
 # out as "hang over" or "Inova".
@@ -58,7 +58,7 @@ class Enrolment:
             x = speech_only(pcm)
             if len(x) < MIN_SPEECH_SECS * 16000:
                 return
-            if not self._is_take(text):
+            if not self._is_take(text, LINES[len(self._takes)]):
                 self._rejected += 1
                 return
             self._takes.append((x, text))
@@ -89,11 +89,12 @@ class Enrolment:
             self.on_learned(learned)
         logger.info(f"enrolled; learned {len(learned)} wake spelling(s)")
 
-    def _is_take(self, text: str) -> bool:
-        """Heard as the wake phrase: starts with a wake prefix, or has the name in it."""
-        words = re.sub(r"[^\w\s]", "", text.lower()).split()
-        return (any(words[: len(p.split())] == p.split() for p in WAKE_PREFIXES)
-                or self.cfg.name.lower().split()[0] in words)
+    def _is_take(self, text: str, line: str) -> bool:
+        """Heard as the line asked for: at least half its words, the name aside. The name itself is what speech-to-text
+        mishears ("Nova" as "No"), so it can't be required; a cough or another voice saying something else is out."""
+        words = lambda t: set(re.sub(r"[^\w\s]", "", t.lower()).split())
+        expected = words(line.replace("{name}", ""))
+        return len(expected & words(text)) * 2 >= len(expected)
 
     def status(self) -> dict:
         active = self.active

@@ -97,7 +97,7 @@ def _real_bot(tmp_path, cohort):
         elif path == "/enrol/cancel":
             e.cancel()
         elif path == "/enrol/status" and e.active:
-            e.offer(take, "Hey Milo")
+            e.offer(take, LINES[min(e.status()["heard"], len(LINES) - 1)].format(name="Milo"))
         return e.status()
     return call, vp
 
@@ -130,3 +130,11 @@ def test_a_take_not_heard_as_the_wake_phrase_asks_to_say_it_again():
         return {"active": True, "heard": 0, "done": False, "rejected": 0}
     assert run(cfg(), call, say=said.append, sleep=lambda s: None) == 0
     assert any("say it again" in s.lower() for s in said)
+
+
+
+def test_a_line_heard_but_never_matched_does_not_blame_the_mic():
+    said = []
+    call = lambda m, p: {"active": True, "heard": 0, "done": False, "rejected": 2}
+    assert run(cfg(), call, say=said.append, sleep=lambda s: None) == 1
+    assert not any("muted" in s for s in said) and any("heard you" in s.lower() for s in said)

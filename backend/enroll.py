@@ -57,6 +57,7 @@ def run(cfg, call, say=print, sleep=time.sleep, delete=False) -> int:
     say(f"Read each line to the orb, where you normally use {cfg.name}. It stays quiet while you do.")
     heard = rejected = 0
     for i, line in enumerate(LINES, 1):
+        rejected_before = rejected
         say(f'\n[{i}/{len(LINES)}]  "{line.format(name=cfg.name)}"')
         for _ in range(WAIT_SECS * 4):
             st = call("GET", "/enrol/status") or {}
@@ -69,7 +70,11 @@ def run(cfg, call, say=print, sleep=time.sleep, delete=False) -> int:
             sleep(0.25)
         else:
             call("POST", "/enrol/cancel")
-            say("\nNothing heard for 20 s: is the orb's mic muted? Nothing was saved; run this again.")
+            if rejected > rejected_before:
+                say("\nIt heard you, but not as that line. Read it word for word, a little slower. Nothing was saved; "
+                    "run this again.")
+            else:
+                say("\nNothing heard for 20 s: is the orb's mic muted? Nothing was saved; run this again.")
             return 1
         if st.get("error"):
             break
