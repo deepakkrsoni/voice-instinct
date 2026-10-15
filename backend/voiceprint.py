@@ -1,6 +1,7 @@
 """The owner's voice (#32): a CAM++ speaker embedding saved by enroll.py, checked on every segment and
 before every interruption. No voiceprint file means the check is off and every voice is accepted."""
 
+import asyncio
 import functools
 import json
 import os
@@ -9,6 +10,10 @@ from pathlib import Path
 
 import numpy as np
 from loguru import logger
+
+from pipecat.frames.frames import InputAudioRawFrame, VADUserStartedSpeakingFrame, VADUserStoppedSpeakingFrame
+from pipecat.turns.types import ProcessFrameResult
+from pipecat.turns.user_start.base_user_turn_start_strategy import BaseUserTurnStartStrategy
 
 SPEAKER_MODEL = "3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx"  # spike #32: 6 ms a clip, 0 errors
 WAKE_PREFIXES = ("hey", "hay", "okay", "ok", "o k")  # as Config.wake_phrases, plus Parakeet's "O K"
@@ -115,3 +120,40 @@ def learned_wake_phrases(cfg) -> list[str]:
     except (ValueError, TypeError):
         logger.warning(f"{path} is not a JSON list of phrases; ignoring it (run enroll.py again)")
         return []
+
+
+class OwnerVADUserTurnStartStrategy(BaseUserTurnStartStrategy):
+    """Pipecat's VADUserTurnStartStrategy, but the turn (and so the interruption) starts only once the
+    first CHECK_SECS of speech is the owner's. The user aggregator feeds every frame, audio included, to
+    its start strategies (pinned by test_owner_start against Pipecat 1.12)."""
+
+    CHECK_SECS = 1.0  # spike #32: others' 1 s windows scored at most 0.15
+    MIN_SECS = 0.4  # shorter than this is left to the transcript check
+
+    def __init__(self, voiceprint, **kwargs):
+        super().__init__(**kwargs)
+        self._voiceprint = voiceprint
+        self._buf: bytearray | None = None  # collecting since the last VAD start
+        self._rate = 16000
+
+    async def process_frame(self, frame) -> ProcessFrameResult:
+        await super().process_frame(frame)
+        if isinstance(frame, VADUserStartedSpeakingFrame):
+            self._buf = bytearray()
+        elif isinstance(frame, InputAudioRawFrame) and self._buf is not None:
+            self._buf += frame.audio
+            self._rate = frame.sample_rate
+            if len(self._buf) >= self.CHECK_SECS * self._rate * 2:
+                return await self._decide()
+        elif isinstance(frame, VADUserStoppedSpeakingFrame) and self._buf is not None:
+            if len(self._buf) >= self.MIN_SECS * self._rate * 2:
+                return await self._decide()
+            self._buf = None
+        return ProcessFrameResult.CONTINUE
+
+    async def _decide(self) -> ProcessFrameResult:
+        pcm, self._buf = bytes(self._buf), None
+        if await asyncio.to_thread(self._voiceprint.is_owner, pcm, self._rate):
+            await self.trigger_user_turn_started()
+            return ProcessFrameResult.STOP
+        return ProcessFrameResult.CONTINUE
