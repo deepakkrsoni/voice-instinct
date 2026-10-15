@@ -114,7 +114,8 @@ def make_wake(phrases, timeout, send, hold=lambda: False) -> ProgrammaticWake:
 def make_dismiss(wake: ProgrammaticWake):
     @tool_options(cancel_on_interruption=False)
     async def dismiss(params):
-        """End the conversation and hide when the user says stop, that's all, go away or similar.
+        """End the conversation and hide whenever the user signals they are done for now, in any words:
+        bye, goodbye, stop, stop for now, that's all, go away.
         First say one short goodbye line. Running errands keep running; this never stops one."""
         wake.dismiss()
         await params.result_callback({"status": "dismissed"},
