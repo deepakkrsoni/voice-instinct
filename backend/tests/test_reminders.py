@@ -33,3 +33,102 @@ def test_spoken_time_is_relative_to_today():
     assert spoken_time(ts(2026, 10, 17, 9, 5, IN), IN, now) == "tomorrow at 9:05 am"
     assert spoken_time(ts(2026, 10, 20, 15, 0, IN), IN, now) == "Tuesday at 3:00 pm"
     assert spoken_time(ts(2026, 11, 20, 15, 0, IN), IN, now) == "20 Nov at 3:00 pm"
+
+
+import asyncio
+
+from registry import Registry
+from reminders import Reminders
+
+
+class FakeRelay:
+    def __init__(self, attached=True):
+        self.attached, self.said = attached, []
+
+    def say(self, text):
+        self.said.append(text)
+
+
+class FakeTelegram:
+    def __init__(self, ok=True):
+        self.ok, self.sent = ok, []
+
+    async def send_message(self, text):
+        self.sent.append(text)
+        return self.ok
+
+
+def make(now, attached=True, locked=False, tg=True, ok=True):
+    reg = Registry(clock=lambda: now[0])
+    relay, telegram = FakeRelay(attached), (FakeTelegram(ok) if tg else None)
+    r = Reminders(reg, relay, telegram, locked=lambda: locked, clock=lambda: now[0], tz=IN)
+    return reg, relay, telegram, r
+
+
+def tick(r):
+    asyncio.run(r.tick())
+
+
+def test_present_it_is_spoken_once():
+    now = [ts(2026, 10, 16, 15, 0, IN)]
+    reg, relay, tg, r = make(now)
+    reg.add_reminder("call mom", now[0], "none")
+    tick(r)
+    tick(r)
+    assert len(relay.said) == 1 and "call mom" in relay.said[0] and tg.sent == []
+
+
+def test_away_it_goes_to_telegram():
+    now = [ts(2026, 10, 16, 15, 0, IN)]
+    reg, relay, tg, r = make(now, locked=True)
+    reg.add_reminder("call mom", now[0], "none")
+    tick(r)
+    assert relay.said == [] and tg.sent == ["⏰ call mom (3:00 pm)"]
+
+
+def test_away_without_telegram_it_waits_then_is_spoken():
+    now = [ts(2026, 10, 16, 15, 0, IN)]
+    reg, relay, _, r = make(now, attached=False, tg=False)
+    reg.add_reminder("call mom", now[0], "none")
+    tick(r)
+    assert reg.pending_reminders()  # put back, not lost
+    relay.attached = True
+    now[0] += 600
+    tick(r)
+    assert len(relay.said) == 1 and "was due at 3:00 pm" in relay.said[0]
+
+
+def test_a_telegram_failure_is_retried():
+    now = [ts(2026, 10, 16, 15, 0, IN)]
+    reg, _, tg, r = make(now, attached=False, ok=False)
+    reg.add_reminder("call mom", now[0], "none")
+    tick(r)
+    tg.ok = True
+    tick(r)
+    assert len(tg.sent) == 2 and reg.pending_reminders() == []
+
+
+def test_an_undeliverable_daily_reminder_does_not_multiply():
+    now = [ts(2026, 10, 16, 9, 0, IN)]
+    reg, relay, _, r = make(now, attached=False, tg=False)
+    reg.add_reminder("water", now[0], "daily")
+    for _ in range(3):
+        tick(r)
+    assert len(reg.pending_reminders()) == 1
+
+
+def test_a_daily_reminder_after_a_long_sleep_fires_once_then_moves_on():
+    now = [ts(2026, 10, 16, 12, 0, IN)]
+    reg, relay, _, r = make(now)
+    reg.add_reminder("water", ts(2026, 10, 10, 9, 0, IN), "daily")
+    tick(r)
+    assert len(relay.said) == 1
+    assert [x["due"] for x in reg.pending_reminders()] == [ts(2026, 10, 17, 9, 0, IN)]
+
+
+def test_a_cancelled_reminder_never_fires():
+    now = [ts(2026, 10, 16, 15, 0, IN)]
+    reg, relay, tg, r = make(now)
+    reg.cancel_reminder(reg.add_reminder("x", now[0], "none"))
+    tick(r)
+    assert relay.said == [] and tg.sent == []

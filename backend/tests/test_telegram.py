@@ -98,3 +98,16 @@ def test_a_rate_limited_message_is_retried_after_the_wait_telegram_asks_for():
     assert [m for m, _, _ in seen] == ["sendMessage", "sendPhoto"]  # both delivered on the retry
     assert seen[0][1] - t0 >= 0.2  # it waited as asked
     assert seen[0][2]["text"] == "Errand steps\ndone: 9 steps" and seen[1][2]["caption"] == "3. browser_click: Buy"
+
+
+def test_send_message_reports_whether_it_was_delivered():
+    async def go(status):
+        server, _ = _bot(status=status)
+        await server.start_server()
+        try:
+            return await Telegram("T", 1, base=str(server.make_url("")).rstrip("/")).send_message("hi")
+        finally:
+            await server.close()
+
+    assert asyncio.run(go(200)) is True and asyncio.run(go(500)) is False
+    assert asyncio.run(Telegram("T", 1, base="http://127.0.0.1:9").send_message("hi")) is False

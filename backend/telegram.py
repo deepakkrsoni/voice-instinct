@@ -29,11 +29,11 @@ class Telegram:
             f.add_field("caption", caption[:CAPTION_MAX])
             f.add_field("photo", png, filename="step.png", content_type="image/png")
             return {"data": f}
-        await self._post("sendPhoto", form)
+        return await self._post("sendPhoto", form)
 
     async def send_message(self, text):
         # ponytail: a report past 4096 chars is cut; send steps.md as a document if errands outgrow it
-        await self._post("sendMessage", lambda: {"json": {"chat_id": self.chat_id, "text": text[:MESSAGE_MAX]}})
+        return await self._post("sendMessage", lambda: {"json": {"chat_id": self.chat_id, "text": text[:MESSAGE_MAX]}})
 
     async def _post(self, method, body):
         """body() builds the request. A 429 (over ~1 message/s per chat, e.g. a burst of quick steps) is
@@ -47,9 +47,10 @@ class Telegram:
                             wait = ((await r.json(content_type=None)).get("parameters") or {}).get("retry_after", 1)
                         elif r.status != 200:
                             logger.warning(f"telegram {method} failed: HTTP {r.status}")
-                            return
+                            return False
                         else:
-                            return
+                            return True
                     await asyncio.sleep(min(float(wait), 30))
         except Exception as e:  # the type only: the error text can carry the URL, which holds the token
             logger.warning(f"telegram {method} failed: {type(e).__name__}")
+            return False
