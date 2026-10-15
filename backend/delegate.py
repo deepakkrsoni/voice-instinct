@@ -17,7 +17,7 @@ GONE = "That errand can't be continued: its session is gone. Start it again?"
 
 
 def make_tools(backend, registry, settings_for, on_finish=None, workspace_root=None, home=None, steps=None,
-               budget=None):
+               budget=None, memory=None):
     home = Path(home) if home else Path.home()
     workspace_root = Path(workspace_root) if workspace_root else home / ".voice-instinct" / "workspace"
     state = {"running": False}  # ponytail: one errand at a time, single user
@@ -104,6 +104,8 @@ def make_tools(backend, registry, settings_for, on_finish=None, workspace_root=N
             status = "error" if res.is_error else "done"
             logger.info(f"task {task_id} {'stopped' if res.stopped else status}")
             registry.finish_task(task_id, status, res.text[:500])
+            if memory:  # for the nightly memory run (consolidate.py)
+                memory.journal("errand", f"{task_id} ({status}): {task} -> errand output, data: {res.text[:2000]}")
             if (registry.get_session(sid) or {}).get("state") != "ended":
                 registry.set_state(sid, "idle")
             await params.result_callback({

@@ -204,3 +204,18 @@ def test_errands_are_told_to_keep_research_proportionate(tmp_path):
     args = asyncio.run(ClaudeCodeBackend(cmd=cli).run("t")).text
     assert "--append-system-prompt" in args
     assert "time limit" in args and "listing pages" in args and "Time check" in args
+
+
+def test_errands_are_told_about_the_user_as_memory_has_it_at_that_moment(tmp_path):
+    cli = _script(tmp_path, 'printf \'{"type":"result","result":"%s"}\\n\' "$*"\n')
+    about = [" Lives in India"]  # the fake CLI echoes args as one JSON line: no newlines
+    backend = ClaudeCodeBackend(cmd=cli, about_user=lambda: about[0])
+    assert "Time check" in (args := asyncio.run(backend.run("t")).text) and "Lives in India" in args
+    about[0] = " Is vegetarian"  # remembered since: read again on every run
+    assert "Is vegetarian" in asyncio.run(backend.run("t")).text
+
+
+def test_another_job_can_bring_its_own_system_prompt(tmp_path):
+    cli = _script(tmp_path, 'printf \'{"type":"result","result":"%s"}\\n\' "$*"\n')
+    args = asyncio.run(ClaudeCodeBackend(cmd=cli, system_prompt="Consolidate memory.").run("t")).text
+    assert "Consolidate memory." in args and "Time check" not in args

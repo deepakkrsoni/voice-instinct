@@ -15,6 +15,11 @@ Not affiliated with Instinct.
 - It hands errands to your own logged-in `claude` CLI as a tracked background task, runs it
   autonomously in a sandbox, and tells you the result.
 - When the task needs a go-ahead or an answer, it asks you aloud and carries on in the same run.
+- It remembers you. "Remember that I'm vegetarian" applies at once, and "forget that" removes it. Every
+  night it files the day's conversations into plain markdown in `~/.voice-instinct/memory/` (a git repo),
+  one file per person, place or preference, and keeps `profile.md`, a short summary of you that every
+  conversation and errand starts with. It starts out knowing your country from your timezone. You can read
+  and edit all of it.
 - It is for errands, not coding or general computer tasks. Today that means research done on the web:
   finding and comparing flights, products, plans and prices, and answering questions about them.
 - It is a Linux desktop app. The tray menu needs a desktop with a system tray (on GNOME, the
@@ -59,6 +64,9 @@ Built on [Pipecat](https://docs.pipecat.ai).
   until it sleeps. The voiceprint stays in `~/.voice-instinct/`, and `uv run enroll.py --delete` removes it.
   If it misses you, lower `[voice] threshold` in `config.toml` (default 0.6); if others get through, raise
   it. It needs the Parakeet engine. Say "stop" to send it away; running errands carry on.
+- Errands can read your memory but never change it, and never see the raw journal of your conversations.
+  The nightly memory run has no network and no web tools, and learns only what you said, never what a
+  web page said. Journals are deleted after 7 days; `./install.sh --uninstall --purge` deletes all memory.
 
 Using a subscription CLI this way depends on the vendor's terms; check them before relying on it.
 

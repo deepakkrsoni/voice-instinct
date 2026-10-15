@@ -59,6 +59,22 @@ def test_delegate_acknowledges_then_reports_and_records_everything():
     assert reg.list_sessions()[0]["last_task"] == "biggest file?"
 
 
+def test_a_finished_errand_goes_into_the_journal_for_the_nightly_memory_run():
+    class Journal:
+        lines = []
+
+        def journal(self, who, text):
+            self.lines.append((who, text))
+
+    j = Journal()
+    (delegate,) = make_tools(FakeBackend([BackendResult("x" * 3000)]), Registry(), lambda sid: "/s.json", memory=j)
+    p, out = make_params()
+    run(delegate(p, "find cotton t-shirts"))
+    (who, text), = j.lines
+    assert who == "errand" and text.startswith(f"{out[-1]['errand']} (done): find cotton t-shirts")
+    assert "errand output, data" in text and len(text) < 2200  # the result is cut to 2,000 characters
+
+
 def test_a_follow_up_with_the_errand_id_resumes_that_session():
     reg, b, delegate = setup([BackendResult("Which folder?"), BackendResult("done")])
     p, out = make_params()

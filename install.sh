@@ -33,6 +33,8 @@ KOKORO_BASE="https://github.com/thewh1teagle/kokoro-onnx/releases/download/model
 KOKORO_ONNX_SHA="7d5df8ecf7d4b1878015a32686053fd0eebe2bc377234608764cc0ef3636a6c5"
 KOKORO_VOICES_SHA="bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d"
 UNIT="$HOME_DIR/.config/systemd/user/voice-instinct.service"
+MEMORY_UNIT="$HOME_DIR/.config/systemd/user/voice-instinct-memory.service"  # the nightly memory run (#26)
+MEMORY_TIMER="$HOME_DIR/.config/systemd/user/voice-instinct-memory.timer"
 AUTOSTART="$HOME_DIR/.config/autostart/voice-instinct.desktop"
 LAUNCHER="$HOME_DIR/.local/bin/voice-instinct"
 
@@ -182,6 +184,30 @@ ${CLAUDE_BIN:+Environment=VI_CLAUDE=$CLAUDE_BIN}
 [Install]
 WantedBy=default.target
 EOF
+  write "$MEMORY_UNIT" 644 <<EOF
+[Unit]
+Description=voice-instinct nightly memory run (files the day's conversations into memory)
+
+[Service]
+Type=oneshot
+WorkingDirectory=$REPO/backend
+ExecStart=$uvbin run --project $REPO/backend python consolidate.py
+Environment=PYTHONUNBUFFERED=1
+Environment=PATH=$HOME_DIR/.local/bin:/usr/local/bin:/usr/bin:/bin${CLAUDE_BIN:+:${CLAUDE_BIN%/*}}
+${CLAUDE_BIN:+Environment=VI_CLAUDE=$CLAUDE_BIN}
+EOF
+  write "$MEMORY_TIMER" 644 <<EOF
+[Unit]
+Description=voice-instinct nightly memory run
+
+[Timer]
+OnCalendar=*-*-* 03:00
+# a night the laptop slept through runs at the next boot
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
   write "$LAUNCHER" 755 <<EOF
 #!/usr/bin/env bash
 # voice-instinct launcher: "voice-instinct" starts the orb, "voice-instinct toggle" shows or hides it,
@@ -203,6 +229,7 @@ EOF
     run systemctl --user daemon-reload
     run systemctl --user enable voice-instinct.service
     run systemctl --user restart voice-instinct.service  # re-run = update: pick up new code
+    run systemctl --user enable --now voice-instinct-memory.timer
   else
     say "No systemd user session here; start the backend with: cd $REPO/backend && uv run bot.py"
   fi
@@ -218,9 +245,9 @@ uninstall() {
   if [ -x "$LAUNCHER" ] || [ "$DRY" = 1 ]; then  # the orb would keep running until logout
     if [ "$DRY" = 1 ]; then run "$LAUNCHER" quit; else timeout 5 "$LAUNCHER" quit >/dev/null 2>&1 || true; fi
   fi
-  if [ "$DRY" = 1 ]; then run systemctl --user disable --now voice-instinct.service
-  else systemctl --user disable --now voice-instinct.service 2>/dev/null || true; fi
-  run rm -f "$UNIT" "$AUTOSTART" "$LAUNCHER"
+  if [ "$DRY" = 1 ]; then run systemctl --user disable --now voice-instinct.service voice-instinct-memory.timer
+  else systemctl --user disable --now voice-instinct.service voice-instinct-memory.timer 2>/dev/null || true; fi
+  run rm -f "$UNIT" "$MEMORY_UNIT" "$MEMORY_TIMER" "$AUTOSTART" "$LAUNCHER"
   if [ "$DRY" = 1 ]; then run systemctl --user daemon-reload
   else systemctl --user daemon-reload 2>/dev/null || true; fi
   if [ "$PURGE" = 1 ]; then say "remove data in $HOME_DIR/.voice-instinct (models, database, workspace)"; run rm -rf "$HOME_DIR/.voice-instinct"; fi
