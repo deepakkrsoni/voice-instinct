@@ -33,13 +33,14 @@ def _rule(p: Path, home: Path) -> str:
         return "/" + p.as_posix()
 
 
-def sandbox_settings(home, app_dir, data_dir, hook_port=7860) -> dict:
+def sandbox_settings(home, app_dir, data_dir, hook_port=7860, errand=True) -> dict:
     home, app_dir, data_dir = Path(home), Path(app_dir), Path(data_dir)
-    dirs = [home / d for d in _SECRET_DIRS] + [data_dir / "runs"]
+    # Memory (memory.py): errands grep it but never change it, and never read the raw journal of conversations.
+    dirs = [home / d for d in _SECRET_DIRS] + [data_dir / "runs"] + ([data_dir / "memory/journal"] if errand else [])
     files = [home / f for f in _SECRET_FILES] + [
         app_dir / ".env", data_dir / "hook-token", data_dir / "harness.db",
         data_dir / "harness.db-wal", data_dir / "harness.db-shm"]  # WAL mode keeps recent writes here
-    deny = []
+    deny = [f"Edit({_rule(data_dir / 'memory', home)}/**)"] if errand else []
     for p in dirs:
         deny += [f"Read({_rule(p, home)}/**)", f"Edit({_rule(p, home)}/**)"]
     for p in files:
@@ -64,6 +65,21 @@ def sandbox_settings(home, app_dir, data_dir, hook_port=7860) -> dict:
         # The user's own instructions are for their own sessions, not for errands.
         "claudeMdExcludes": [str(home / "CLAUDE.md"), str(home / "CLAUDE.local.md")],
     }
+
+
+def consolidation_settings(home, app_dir, data_dir) -> dict:
+    """The nightly memory run (consolidate.py): it writes memory, journal included, but the journal holds web
+    text from errands, so it gets no network, no web tools and the same secret denials as errands."""
+    s = sandbox_settings(home, app_dir, data_dir, errand=False)
+    s["sandbox"]["network"] = {"allowedDomains": [], "strictAllowlist": True}
+    # Nothing it writes may run or steer code later (git hooks, its next run's settings and instructions, at any
+    # depth: Claude Code loads people/CLAUDE.md when it reads people/), and .gitignore keeps the raw journal out
+    # of git history. The files our code owns are denied too. Edit denies cover Bash (merged into denyWrite).
+    memory = _rule(Path(data_dir) / "memory", Path(home))
+    s["permissions"]["deny"] += ["WebFetch", "WebSearch", *(f"Edit({memory}/{p})" for p in (
+        "**/.git/**", "**/.claude/**", "**/CLAUDE.md", "**/CLAUDE.local.md", ".gitignore", "notes.md",
+        ".consolidated", "journal/**"))]
+    return s
 
 
 def browser_mcp(home, cdp_endpoint=None):

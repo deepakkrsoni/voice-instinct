@@ -287,6 +287,24 @@ def test_the_service_is_told_where_claude_is_even_outside_the_default_path(tmp_p
     assert "VI_CLAUDE" not in render_unit(tmp_path, "")
 
 
+def test_the_nightly_memory_run_is_a_timer_that_catches_up_after_sleep(tmp_path):
+    r, home = run_clean(tmp_path, "--dry-run")
+    units = home / ".config/systemd/user"
+    assert f"would write: {units}/voice-instinct-memory.service" in r.stdout
+    assert f"would write: {units}/voice-instinct-memory.timer" in r.stdout
+    assert "would run: systemctl --user enable --now voice-instinct-memory.timer" in r.stdout
+    src = SCRIPT.read_text()
+    timer = src.split('write "$MEMORY_TIMER" 644 <<EOF\n', 1)[1].split("\nEOF\n", 1)[0]
+    assert "OnCalendar=*-*-* 03:00" in timer and "Persistent=true" in timer  # a missed night runs at next boot
+    service = src.split('write "$MEMORY_UNIT" 644 <<EOF\n', 1)[1].split("\nEOF\n", 1)[0]
+    assert "Type=oneshot" in service and "python consolidate.py" in service and "VI_CLAUDE" in service
+
+
+def test_uninstall_removes_the_memory_timer(tmp_path):
+    out = run(tmp_path, "arch", "--uninstall", "--dry-run")[0].stdout
+    assert "disable --now voice-instinct.service voice-instinct-memory.timer" in out and "voice-instinct-memory.service" in out
+
+
 def test_install_starts_the_orb_in_a_desktop_session_and_says_how_otherwise(tmp_path):
     r, home = run_clean(tmp_path, "--dry-run", extra_env={"WAYLAND_DISPLAY": "wayland-1"})
     launcher = str(home / ".local/bin/voice-instinct")

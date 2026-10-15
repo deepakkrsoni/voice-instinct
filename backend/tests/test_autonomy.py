@@ -142,3 +142,36 @@ def test_debug_runs_deny_edits_to_the_record_without_changing_the_shared_setting
     assert "Edit(~/trip/debug/**)" in debug["permissions"]["deny"]
     assert "Edit(~/trip/debug/**)" not in base["permissions"]["deny"]
     assert debug["sandbox"] == base["sandbox"]
+
+
+def test_errands_may_read_memory_but_never_change_it_nor_read_the_raw_journal():
+    s = sandbox_settings(HOME, APP, DATA)
+    rules, deny_read = s["permissions"]["deny"], s["sandbox"]["filesystem"]["denyRead"]
+    assert "Edit(~/.voice-instinct/memory/**)" in rules  # merged into the sandbox's denyWrite: Bash too
+    assert "Read(~/.voice-instinct/memory/**)" not in rules  # grep finds facts there
+    assert "Read(~/.voice-instinct/memory/journal/**)" in rules and "~/.voice-instinct/memory/journal" in deny_read
+
+
+def test_the_nightly_run_writes_memory_but_has_no_network_or_web_and_no_secrets():
+    from autonomy import consolidation_settings
+    s = consolidation_settings(HOME, APP, DATA)
+    rules = s["permissions"]["deny"]
+    assert "Edit(~/.voice-instinct/memory/**)" not in rules  # its own folder, journal included
+    assert not any(r.startswith("Read(") and "memory/journal" in r for r in rules)  # it reads the journal
+    assert "Read(~/.ssh/**)" in rules and "Read(~/.voice-instinct/harness.db)" in rules
+    assert "WebFetch" in rules and "WebSearch" in rules
+    assert s["sandbox"]["network"] == {"allowedDomains": [], "strictAllowlist": True}
+    assert s["sandbox"]["enabled"] and s["sandbox"]["failIfUnavailable"]
+    assert "~/.voice-instinct/memory/journal" not in s["sandbox"]["filesystem"]["denyRead"]
+
+
+def test_the_nightly_run_cannot_plant_code_that_runs_outside_its_sandbox():
+    # Its input holds web text: git hooks, its own next run's settings or a CLAUDE.md would all run or steer
+    # code later. .gitignore keeps the raw journal out of git history.
+    from autonomy import consolidation_settings
+    rules = consolidation_settings(HOME, APP, DATA)["permissions"]["deny"]
+    # Nested too (review): Claude Code loads people/CLAUDE.md when it reads people/. The files it must leave
+    # alone (notes.md, .consolidated, the journal) are denied as well, not only asked of it.
+    for p in ("**/.git/**", "**/.claude/**", "**/CLAUDE.md", "**/CLAUDE.local.md", ".gitignore", "notes.md",
+              ".consolidated", "journal/**"):
+        assert f"Edit(~/.voice-instinct/memory/{p})" in rules, p

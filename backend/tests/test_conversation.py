@@ -126,5 +126,27 @@ def test_a_failing_save_never_breaks_the_session():
     save(Broken(), LLMContext(messages=[{"role": "user", "content": "hi"}]))  # logged, not raised
 
 
+def test_forget_scrubs_the_fact_from_the_conversation_nova_restores():
+    # Review: a forgotten fact lived on in the saved conversation (and its summary), restored at every connect.
+    from conversation import scrub
+    from memory import matcher
+    reg = Registry()
+    remember_call = {"role": "assistant", "content": None, "tool_calls": [{"id": "r1", "type": "function", "function": {
+        "name": "remember", "arguments": '{"fact": "Is vegetarian"}'}}]}
+    ctx = LLMContext(messages=[
+        {"role": "user", "content": "Summary of the conversation so far: errand 3: t-shirts. The user is vegetarian."},
+        {"role": "user", "content": "Remember that I'm vegetarian"}, remember_call,
+        {"role": "tool", "tool_call_id": "r1", "content": '{"status": "remembered"}'},
+        {"role": "tool", "tool_call_id": "r2", "content": '{"found": "notes.md: - Is vegetarian"}'},
+        {"role": "assistant", "content": [{"type": "text", "text": "Noted. You're vegetarian."}]},
+        {"role": "user", "content": "thanks"}])
+    scrub(ctx, matcher("that I'm vegetarian"), reg)
+    assert "vegetarian" not in json.dumps(ctx.get_messages()).lower()
+    msgs = ctx.get_messages()
+    assert msgs[0]["content"] == "Summary of the conversation so far: errand 3: t-shirts."  # the rest stays
+    assert msgs[2]["tool_calls"][0]["id"] == "r1" and msgs[6]["content"] == "thanks"
+    assert "vegetarian" not in json.dumps(reg.load_conversation()).lower()  # and the saved copy
+
+
 def test_the_ongoing_conversation_stays_bounded_by_summarization():
     assert ASSISTANT_PARAMS.enable_auto_context_summarization is True

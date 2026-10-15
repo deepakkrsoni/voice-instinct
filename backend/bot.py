@@ -25,7 +25,7 @@ from pipecat.frames.frames import TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.frameworks.rtvi.observer import RTVIObserverParams
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
-from conversation import ASSISTANT_PARAMS, make_context, save as save_conversation
+from conversation import ASSISTANT_PARAMS, make_context, save as save_conversation, scrub as scrub_conversation
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
@@ -46,6 +46,7 @@ from shutdown import cancel_on_exit
 from steps import StepHub
 from telegram import Telegram
 from enrolment import Enrolment, make_enrol_router
+from memory import PROMPT as MEMORY_PROMPT, Memory, make_memory_tools
 from voiceprint import Voiceprint, cohort_mean, learned_wake_phrases
 from wake import handle_client_message, make_dismiss, make_wake
 
@@ -68,6 +69,8 @@ registry = Registry(DATA / "harness.db")
 registry.expire_open()  # questions left open by a previous run can no longer be answered
 sessions = set()  # open sessions' runners, cancelled when the server is stopped
 relay = Relay(registry)
+MEMORY = Memory(DATA / "memory")  # profile, notes and memory files (#25, #26); off if unusable
+MEMORY.ensure()
 bridge = HookBridge(registry, relay, cfg.permission_timeout)
 HOOK_TOKEN = load_token(DATA / "hook-token")
 WAKES = set()  # open sessions' wake strategies, told about spellings learned at enrolment (#32)
@@ -119,6 +122,7 @@ SYSTEM_PROMPT = (
     "errand id; for a new topic leave errand out. When you are told a session needs a decision, "
     "ask the user, then call answer_question after they answer. Use list_sessions to answer what "
     "you are working on and stop_session to stop one. "
+    + MEMORY_PROMPT +
     "You have no clock: for the time or date, or anything that depends on today, call current_time. "
     "For reminders, call current_time first, then set_reminder with the exact local time. "
     "Whenever the user signals they are done for now, in any words (bye, bye bye, goodbye, stop, stop for "
@@ -155,9 +159,11 @@ async def bot(runner_args: RunnerArguments):
     backend = ClaudeCodeBackend(cmd=os.environ.get("VI_CLAUDE", "claude"), cwd=cfg.backend_cwd,
                                 timeout=cfg.backend_timeout, permission_mode=cfg.permission_mode,
                                 hide_env=(cfg.api_key_env, "TELEGRAM_CHAT_ID"),  # the bot token goes as *_TOKEN
-                                mcp_config=_browser_config())
-    prompt = f"Your name is {cfg.name}. " + SYSTEM_PROMPT  # set in config.toml; never from history
-    llm = build_llm(cfg, prompt if backend.available() else prompt + NO_AGENT)
+                                mcp_config=_browser_config(),
+                                about_user=lambda: MEMORY.prompt_block(errand=True))  # read fresh per errand
+    # The name is set in config.toml, never from history; the profile is read fresh at every connect (#25).
+    prompt = f"Your name is {cfg.name}. " + SYSTEM_PROMPT
+    llm = build_llm(cfg, (prompt if backend.available() else prompt + NO_AGENT) + MEMORY.prompt_block())
     holder = {}
 
     async def send_gui(msg):
@@ -170,7 +176,9 @@ async def bot(runner_args: RunnerArguments):
     # As Siri does: only a wake phrase said while asleep is voice-checked (#32)
     stt = make_stt(cfg, voiceprint=VOICEPRINT, enrolment=ENROLMENT, needs_check=wake.would_wake)
 
-    tools = [make_dismiss(wake), current_time, *make_reminder_tools(registry, TELEGRAM)]  # with or without Claude
+    tools = [make_dismiss(wake), current_time, *make_reminder_tools(registry, TELEGRAM),
+             # forget also scrubs the conversation restored at every connect (context is set below, before any call)
+             *make_memory_tools(MEMORY, on_forget=lambda match: scrub_conversation(context, match, registry))]
     if backend.available():
         autonomy = sandbox_settings(Path.home(), REPO_ROOT, DATA, hook_port=HOOK_PORT)
         settings_for = lambda sid, debug_cwd=None: write_run_settings(
@@ -179,7 +187,8 @@ async def bot(runner_args: RunnerArguments):
             hook_timeout=int(cfg.permission_timeout) + 10)  # Claude must outwait our own question timeout
         # Tools declare their own options with @tool_options; the context's tools (make_context) are the registration.
         tools += [*make_tools(backend, registry, settings_for, on_finish=bridge.expire_session,
-                             workspace_root=Path(cfg.workspace_dir).expanduser(), steps=STEPS, budget=BUDGET),
+                             workspace_root=Path(cfg.workspace_dir).expanduser(), steps=STEPS, budget=BUDGET,
+                             memory=MEMORY),
                  *make_bridge_tools(bridge, relay, registry, backend)]
     else:
         logger.warning("claude CLI not found; running front-model-only")
@@ -231,6 +240,7 @@ async def bot(runner_args: RunnerArguments):
     @user_aggregator.event_handler("on_user_turn_stopped")
     async def on_user_turn_stopped(aggregator, strategy, message):
         relay.user_turn(False)
+        MEMORY.journal("user", message.content)  # for the nightly memory run; speech before the wake phrase never gets here
 
     @assistant_aggregator.event_handler("on_assistant_turn_started")
     async def on_assistant_turn_started(aggregator, *args):
@@ -238,8 +248,9 @@ async def bot(runner_args: RunnerArguments):
         wake.wake("reply")  # an errand's result or a note: show the orb and listen for the answer
 
     @assistant_aggregator.event_handler("on_assistant_turn_stopped")
-    async def on_assistant_turn_stopped(aggregator, *args):
+    async def on_assistant_turn_stopped(aggregator, message):
         relay.bot_turn(False)
+        MEMORY.journal("assistant", message.content)
         wake.assistant_turn_done()  # the user can reply without the phrase, unless they said stop
         save_conversation(registry, context)
 

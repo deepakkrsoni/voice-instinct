@@ -68,9 +68,11 @@ def _kill_group(proc) -> None:
 class ClaudeCodeBackend:
     def __init__(self, cmd: str = "claude", cwd: str | None = None, timeout: float = 120,
                  permission_mode: str | None = "acceptEdits", hide_env: Iterable[str] = (),
-                 mcp_config: str | None = None):
+                 mcp_config: str | None = None, system_prompt: str = ERRAND_GUIDANCE, about_user=None):
         # acceptEdits: file edits inside the task's own folder don't prompt; shell commands still do.
         self.cmd, self.cwd, self.timeout, self.permission_mode = cmd, cwd, timeout, permission_mode
+        self.system_prompt = system_prompt
+        self.about_user = about_user  # memory.prompt_block: the profile, read fresh for every run (#25)
         self.hide_env = tuple(hide_env)  # e.g. the front model's api_key_env, whatever it is called
         self.mcp_config = mcp_config  # the only MCP servers the agent gets (the errand browser)
         self._procs: dict[str, asyncio.subprocess.Process] = {}
@@ -102,7 +104,7 @@ class ClaudeCodeBackend:
         tools = ",".join([*READ_ONLY_TOOLS, *extra_allowed])
         args = [self.cmd, "-p", "--output-format", "stream-json", "--verbose",
                 "--allowedTools", tools,
-                "--append-system-prompt", ERRAND_GUIDANCE,
+                "--append-system-prompt", self.system_prompt + (self.about_user() if self.about_user else ""),
                 "--strict-mcp-config",  # none of the user's own MCP servers (their browsers, Slack, mail)
                 "--setting-sources", "project"]  # nor their ~/.claude settings, plugins or hooks
         mcp = mcp_config or self.mcp_config  # a debug run brings its own browser (steps.py)
