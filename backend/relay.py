@@ -138,6 +138,12 @@ class Relay:
         """A question has been spoken and is waiting for the user's answer."""
         return self._current is not None
 
+    @property
+    def holds_awake(self) -> bool:
+        """Nova must not fall asleep: it is speaking, or a question waits for an answer. A long reply used to
+        outlast the awake window, so the follow-up was missed and the orb, re-shown by each sentence, stayed up."""
+        return self.asking or self._bot_active
+
     def detach(self, task=None):
         self._sessions = [p for p in self._sessions if task is None or p[0] is not task]
         if task is not None and task is not self._task:

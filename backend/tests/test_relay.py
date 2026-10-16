@@ -607,3 +607,14 @@ def test_a_note_reports_when_it_is_spoken_and_when_it_is_dropped():
         return events
 
     assert run(go()) == ["spoken1", "dropped2"]
+
+
+def test_it_holds_nova_awake_while_it_speaks_or_waits_for_an_answer():
+    # A long reply outlasted the 10 s awake window: Nova fell asleep mid-answer, missed the follow-up,
+    # and the orb, re-shown by each sentence, never hid again (2026-10-16).
+    relay = Relay(Registry())
+    idle = relay.holds_awake
+    relay.bot_turn(True)  # on_assistant_turn_started
+    speaking = relay.holds_awake
+    relay.bot_turn(False)  # on_assistant_turn_stopped
+    assert (idle, speaking, relay.holds_awake) == (False, True, False)

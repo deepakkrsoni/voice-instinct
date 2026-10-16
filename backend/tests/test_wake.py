@@ -267,3 +267,20 @@ def test_the_name_anywhere_wakes_it():
     users, _, sent, _ = asyncio.run(converse(["could you, Nova, check the weather"],
                                              early=lambda w: w.add_phrases(Config().wake_phrases)))
     assert sent and sent[0] == {"type": "wake", "reason": "phrase"}
+
+
+def test_a_reply_longer_than_the_window_still_hears_the_follow_up():
+    # The window must not run out while Nova speaks; it restarts when Nova finishes (assistant_turn_done).
+    talking = {"on": True}
+
+    def long_reply(w):
+        w.wake("reply")
+
+        def done():
+            talking["on"] = False
+            w.assistant_turn_done()
+        asyncio.get_running_loop().call_later(0.7, done)  # the reply outlasts the 0.5 s window
+
+    users, _, sent, _ = asyncio.run(converse(
+        ["which bank should i use"], timeout=0.5, hold=lambda: talking["on"], pause=0.9, before=long_reply))
+    assert users == ["which bank should i use"]  # a "sleep" may follow, once the new window runs out
