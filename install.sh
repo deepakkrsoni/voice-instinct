@@ -91,7 +91,7 @@ node_install() {
 }
 
 models() {
-  if [ -f "$MODELS/$STT/tokens.txt" ]; then say "keep speech model $STT"; else
+  if [ -f "$MODELS/$STT/tokens.txt" ] || [ -f "$MODELS/$STT/${STT#sherpa-onnx-whisper-}-tokens.txt" ]; then say "keep speech model $STT"; else
     fetch "$STT_URL" "$MODELS/$STT.tar.bz2" "$STT_SHA"
     run tar -xjf "$MODELS/$STT.tar.bz2" -C "$MODELS"
     run rm -f "$MODELS/$STT.tar.bz2"
@@ -124,7 +124,13 @@ stt_choice() {
       STT_SHA="a81909a1780d84cff16d73c15e13e67d9d81d8839faf14870d507d8499f7a61a" ;;
     parakeet) STT="sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
       STT_SHA="5793d0fd397c5778d2cf2126994d58e9d56b1be7c04d13c7a15bb1b4eafb16bf" ;;
-    *) echo "config.toml: [stt] engine must be one of nemotron, nemotron-multilingual, parakeet (got '$engine')" >&2; exit 1 ;;
+    whisper-tiny) STT="sherpa-onnx-whisper-tiny"
+      STT_SHA="c46116994e539aa165266d96b325252728429c12535eb9d8b6a2b10f129e66b1" ;;
+    whisper-base) STT="sherpa-onnx-whisper-base"
+      STT_SHA="911b2083efd7c0dca2ac3b358b75222660dc09fb716d64fbfc417ba6c99ff3de" ;;
+    whisper-small) STT="sherpa-onnx-whisper-small"
+      STT_SHA="486a46afbb7ba798507190ffe02fea2dd726049af212e774537efac6afb210a6" ;;
+    *) echo "config.toml: [stt] engine must be one of nemotron, nemotron-multilingual, parakeet, whisper-tiny, whisper-base, whisper-small (got '$engine')" >&2; exit 1 ;;
   esac
   STT_URL="$ASR_MODELS/$STT.tar.bz2"
 }
@@ -301,6 +307,6 @@ if [ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ]; then
 else
   say "Done. Start the orb with $LAUNCHER (it starts by itself from your next login), then say \"${name:-Nova}\"."
 fi
-if [ "$(cfgval engine)" = parakeet ]; then  # the voice check needs Parakeet (#32)
-  say "To make only your voice wake it (one minute, with the orb open): cd $REPO/backend && uv run enroll.py"
-fi
+case "$(cfgval engine)" in parakeet|whisper-*)  # the voice check needs Parakeet or Whisper (#32)
+  say "To make only your voice wake it (one minute, with the orb open): cd $REPO/backend && uv run enroll.py" ;;
+esac

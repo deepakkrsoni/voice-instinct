@@ -47,6 +47,12 @@ def test_nemotron_is_refused_before_calling_the_bot():
     assert bot.calls == [] and any("parakeet" in s for s in said)
 
 
+def test_enrolment_runs_with_a_whisper_engine():
+    bot = FakeBot()
+    assert run(cfg("whisper-base"), bot, say=lambda s: None, sleep=lambda s: None) == 0
+    assert ("POST", "/enrol/start") in bot.calls
+
+
 def test_a_failure_in_the_bot_is_reported_at_once():
     said = []
     bot = FakeBot()

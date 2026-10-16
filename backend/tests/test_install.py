@@ -56,6 +56,12 @@ def test_the_enrol_hint_is_shown_with_parakeet(tmp_path):
     assert "uv run enroll.py" in r.stdout
 
 
+def test_the_enrol_hint_is_shown_with_whisper(tmp_path):
+    r, _ = run_clean(tmp_path, "--dry-run", config='[stt]\nengine = "whisper-base"\n')
+    assert r.returncode == 0, r.stderr
+    assert "uv run enroll.py" in r.stdout
+
+
 def test_uv_resolved_from_local_bin_after_install(tmp_path):
     r, home = run_clean(tmp_path, "--dry-run", extra_env={"PATH": "/usr/bin:/bin"})
     assert r.returncode == 0, r.stderr
@@ -382,19 +388,32 @@ def run_with_engine(tmp_path, engine):
 NEMOTRON = "sherpa-onnx-nemotron-speech-streaming-en-0.6b-160ms-int8-2026-04-25.tar.bz2"
 MULTI = "sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-160ms-int8-2026-06-11.tar.bz2"
 PARAKEET = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2"
+WHISPER = {s: f"sherpa-onnx-whisper-{s}.tar.bz2" for s in ("tiny", "base", "small")}
 
 
 @pytest.mark.parametrize("engine,wanted", [(None, NEMOTRON), ("nemotron", NEMOTRON),
-                                           ("nemotron-multilingual", MULTI), ("parakeet", PARAKEET)])
+                                           ("nemotron-multilingual", MULTI), ("parakeet", PARAKEET),
+                                           ("whisper-tiny", WHISPER["tiny"]), ("whisper-base", WHISPER["base"]),
+                                           ("whisper-small", WHISPER["small"])])
 def test_only_the_chosen_speech_model_is_downloaded(tmp_path, engine, wanted):
     r = run_with_engine(tmp_path, engine)
     assert r.returncode == 0, r.stderr
     assert wanted in r.stdout
-    assert [m for m in (NEMOTRON, MULTI, PARAKEET) if m in r.stdout] == [wanted]
+    assert [m for m in (NEMOTRON, MULTI, PARAKEET, *WHISPER.values()) if m in r.stdout] == [wanted]
+
+
+def test_an_installed_whisper_model_is_kept_on_re_run(tmp_path):
+    d = tmp_path / "home" / ".voice-instinct" / "models" / "sherpa-onnx-whisper-base"
+    d.mkdir(parents=True)
+    (d / "base-tokens.txt").write_text("x")
+    r = run_with_engine(tmp_path, "whisper-base")
+    assert r.returncode == 0, r.stderr
+    assert "keep speech model sherpa-onnx-whisper-base" in r.stdout
+    assert WHISPER["base"] not in r.stdout
 
 
 def test_an_unknown_speech_engine_stops_before_anything_is_installed(tmp_path):
     r = run_with_engine(tmp_path, "whisper")
     assert r.returncode == 1
-    assert "[stt] engine must be one of nemotron, nemotron-multilingual, parakeet" in r.stderr
+    assert "[stt] engine must be one of nemotron, nemotron-multilingual, parakeet, whisper-tiny, whisper-base, whisper-small" in r.stderr
     assert "System packages" not in r.stdout and "would run" not in r.stdout
