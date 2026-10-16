@@ -1,12 +1,24 @@
 """Settings for both halves, read from config.toml at the repo root (sectioned; flat keys still work)."""
 
+import re
 import tomllib
 from dataclasses import dataclass, fields
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 POSITIONS = ("bottom-right", "bottom-left", "top-right", "top-left", "center")
-STT_ENGINES = ("nemotron", "nemotron-multilingual", "parakeet")  # services.make_stt; install.sh's table
+STT_ENGINES = ("nemotron", "nemotron-multilingual", "parakeet",
+               "whisper-tiny", "whisper-base", "whisper-small")  # services.make_stt; install.sh's table
+
+
+def is_whisper(engine: str) -> bool:
+    return engine.startswith("whisper-")
+
+
+def checks_voice(engine: str) -> bool:
+    """Engines that hand over a finished segment the owner's voice can be checked on (nemotron streams)."""
+    return engine == "parakeet" or is_whisper(engine)
+
 
 # config.toml section -> {key in file: Config field}
 _SECTIONS = {
@@ -18,7 +30,7 @@ _SECTIONS = {
     "agent": {"permission_mode": "permission_mode", "backend_timeout": "backend_timeout",
               "permission_timeout": "permission_timeout"},
     "debug": {"browser_steps": "debug_browser_steps"},
-    "stt": {"engine": "stt_engine"},
+    "stt": {"engine": "stt_engine", "language": "stt_language"},
     "voice": {"threshold": "voice_threshold"},
 }
 
@@ -42,6 +54,7 @@ class Config:
     permission_mode: str = "auto"  # Claude Code mode for delegated runs; the sandbox bounds what auto may do
     debug_browser_steps: bool = False  # screenshot every errand browser step (steps.py)
     stt_engine: str = "nemotron"  # speech-to-text engine (services.make_stt); install.sh downloads only this one
+    stt_language: str = "en"  # Whisper's language code ([stt] language)
     voice_threshold: float = 0.6  # owner-voice cut-off (voiceprint.py); spike 2 (#32): EER 0 to 5% at 0.60
 
     @property
@@ -51,7 +64,11 @@ class Config:
         owner's "Hey Nova" as "hang over" or "Inova", while "Nova" alone came out right (#32)."""
         words = self.name.lower().split()
         merged = [" ".join([p + words[0], *words[1:]]) for p in ("i", "in", "a", "e", "ha", "he", "hey", "o")]
-        return [" ".join(words), *merged]
+        phrases = [" ".join(words), *merged]
+        if is_whisper(self.stt_engine):  # Whisper splits "Nova" as "no va"
+            phrases.append(" ".join([words[0][:-2] + " " + words[0][-2:], *words[1:]]))
+        return phrases
+
 
 def load(path=None) -> Config:
     p = Path(path) if path else REPO_ROOT / "config.toml"
@@ -80,6 +97,8 @@ def load(path=None) -> Config:
         raise ValueError("config.toml: [debug] browser_steps must be true or false")
     if cfg.stt_engine not in STT_ENGINES:
         raise ValueError(f"config.toml: [stt] engine must be one of {', '.join(STT_ENGINES)}")
+    if not isinstance(cfg.stt_language, str) or not re.fullmatch(r"[a-z]{2,3}", cfg.stt_language):
+        raise ValueError('config.toml: [stt] language must be a language code like "en"')
     t = cfg.voice_threshold
     if isinstance(t, bool) or not isinstance(t, (int, float)) or not 0 <= t <= 1:
         raise ValueError("config.toml: [voice] threshold must be a number from 0 to 1")
