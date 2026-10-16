@@ -81,3 +81,14 @@ def test_only_segmented_engines_check_the_voice():
 def test_a_missing_whisper_model_says_to_run_the_installer(tmp_path):
     with pytest.raises(RuntimeError, match="whisper-base speech model is not installed"):
         make_stt(Config(stt_engine="whisper-base", models_dir=str(tmp_path)))
+
+
+def test_repeated_invented_phrases_are_dropped():
+    assert clean("You You You") == ""
+    assert clean("Thank you. Thank you. Thank you.") == ""
+    assert clean("Thank you Thank you Thank you") == ""
+    assert clean("Thank you…") == ""
+
+
+def test_repeats_collapse_regardless_of_case():
+    assert clean("Nova nova Nova") == "Nova"

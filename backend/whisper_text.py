@@ -7,9 +7,10 @@ INVENTED = {"thank you", "thanks for watching", "you"}
 
 
 def clean(text: str) -> str:
-    text = text.strip()
+    # "Nova Nova Nova" -> "Nova", "Thank you. Thank you. Thank you." -> "Thank you."; first, so the checks see the result
+    text = re.sub(r"(?<!\S)(.+?)(?:\s+\1){2,}(?!\S)", r"\1", text.strip(), flags=re.I)
     if re.fullmatch(r"\[[^\]]*\]|\([^)]*\)", text):  # [MUSIC PLAYING], (crickets chirping)
         return ""
-    if text.lower().rstrip(".!?,; ") in INVENTED:
+    if text.lower().rstrip(".!?,;… ") in INVENTED:
         return ""
-    return re.sub(r"(?<!\S)(\S+)(?:\s+\1){2,}(?!\S)", r"\1", text)  # "Nova Nova Nova" -> "Nova"
+    return text

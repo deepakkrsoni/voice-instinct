@@ -43,6 +43,6 @@ engine = "nemotron"
 # language = "en"  # the language Whisper listens for
 
 [voice]
-# Only your voice wakes it, after `cd backend && uv run enroll.py` (needs engine = "parakeet"). Lower this
+# Only your voice wakes it, after `cd backend && uv run enroll.py` (needs engine = "parakeet" or a whisper engine). Lower this
 # if it misses you, raise it if others get through.
 # threshold = 0.6
