@@ -171,7 +171,7 @@ async def bot(runner_args: RunnerArguments):
             await holder["worker"].rtvi.send_server_message(msg)
 
     wake = make_wake(cfg.wake_phrases + learned_wake_phrases(cfg), cfg.awake_timeout, send_gui,
-                     hold=lambda: relay.asking)
+                     hold=lambda: relay.holds_awake)  # the window restarts when Nova finishes speaking
     WAKES.add(wake)
     # As Siri does: only a wake phrase said while asleep is voice-checked (#32)
     stt = make_stt(cfg, voiceprint=VOICEPRINT, enrolment=ENROLMENT, needs_check=wake.would_wake)
