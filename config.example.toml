@@ -32,10 +32,13 @@ browser_steps = false
 
 [stt]
 # Speech-to-text, all local: nemotron (English, streaming, default), nemotron-multilingual
-# (40 languages, streaming) or parakeet (the previous engine). Re-run ./install.sh after changing it:
-# it downloads only the engine chosen here (about 450 MB). Nemotron's weights are under the NVIDIA
-# Open Model License.
+# (40 languages, streaming), parakeet (the previous engine), or whisper-tiny / whisper-base /
+# whisper-small. Whisper heard far-away speech best in testing: whisper-base is about 120 ms per
+# phrase and a 198 MB download (tiny 111 MB, small 610 MB: slower, a little better).
+# Re-run ./install.sh after changing it: it downloads only the engine chosen here (nemotron
+# about 450 MB). Nemotron's weights are under the NVIDIA Open Model License.
 engine = "nemotron"
+# language = "en"  # the language Whisper listens for
 
 [voice]
 # Only your voice wakes it, after `cd backend && uv run enroll.py` (needs engine = "parakeet"). Lower this

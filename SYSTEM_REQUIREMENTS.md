@@ -8,7 +8,7 @@
   CPU; no GPU is needed. A recent 4-core CPU or better is recommended (tested on a 12-core AMD Ryzen AI Max+ laptop).
 - **Memory:** 8 GB minimum, 16 GB recommended. In use, the backend takes about 2 GB, the orb about
   0.5 GB, and a running errand (Claude Code and its browser) about 1 GB more.
-- **Disk:** about 3.5 GB free. The installer downloads about 2 GB: speech models (~1 GB), Node.js
+- **Disk:** about 3.5 GB free. The installer downloads about 2 GB: speech models (~1 GB; Whisper is 0.1 to 0.6 GB), Node.js
   (~0.2 GB), the errand browser (~0.7 GB), plus the Python and Node packages.
 - **Microphone and speakers** (or a headset).
 
