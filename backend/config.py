@@ -1,6 +1,5 @@
 """Settings for both halves, read from config.toml at the repo root (sectioned; flat keys still work)."""
 
-import re
 import tomllib
 from dataclasses import dataclass, fields
 from pathlib import Path
@@ -9,6 +8,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 POSITIONS = ("bottom-right", "bottom-left", "top-right", "top-left", "center")
 STT_ENGINES = ("nemotron", "nemotron-multilingual", "parakeet",
                "whisper-tiny", "whisper-base", "whisper-small")  # services.make_stt; install.sh's table
+# Whisper's language, for now English only. English mode also covers Hinglish (written in Roman letters) and
+# translates plain Hindi; Hindi mode ("hi") gave garbage in these int8 builds (tested 2026-10-16). A code sherpa-onnx
+# doesn't know makes it exit the whole process on the first utterance, so load() refuses anything else.
+WHISPER_LANGUAGES = frozenset({"en"})
 
 
 def is_whisper(engine: str) -> bool:
@@ -97,8 +100,8 @@ def load(path=None) -> Config:
         raise ValueError("config.toml: [debug] browser_steps must be true or false")
     if cfg.stt_engine not in STT_ENGINES:
         raise ValueError(f"config.toml: [stt] engine must be one of {', '.join(STT_ENGINES)}")
-    if not isinstance(cfg.stt_language, str) or not re.fullmatch(r"[a-z]{2,3}", cfg.stt_language):
-        raise ValueError('config.toml: [stt] language must be a language code like "en"')
+    if cfg.stt_language not in WHISPER_LANGUAGES:  # never a string Whisper would choke on mid-session
+        raise ValueError('config.toml: [stt] language must be "en" for now (it also covers Hinglish)')
     t = cfg.voice_threshold
     if isinstance(t, bool) or not isinstance(t, (int, float)) or not 0 <= t <= 1:
         raise ValueError("config.toml: [voice] threshold must be a number from 0 to 1")

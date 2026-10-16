@@ -145,16 +145,26 @@ def test_stt_language_defaults_to_english_and_is_read_from_its_section(tmp_path)
     p = tmp_path / "c.toml"
     p.write_text('[stt]\nengine = "whisper-base"\n')
     assert load(p).stt_language == "en"
-    p.write_text('[stt]\nengine = "whisper-base"\nlanguage = "de"\n')
-    assert load(p).stt_language == "de"
+    p.write_text('[stt]\nengine = "whisper-base"\nlanguage = "en"\n')
+    assert load(p).stt_language == "en"
 
 
 def test_stt_language_must_be_a_short_code(tmp_path):
+    # "eng" and "xx" look like codes but Whisper doesn't know them: sherpa-onnx then exits the whole backend
+    # on the first utterance ("Invalid language: eng", PR #39 review), so they must fail here, at startup.
     p = tmp_path / "c.toml"
-    for bad in ('"english"', '""', "5"):
+    for bad in ('"english"', '""', "5", '"eng"', '"xx"'):
         p.write_text(f"[stt]\nlanguage = {bad}\n")
-        with pytest.raises(ValueError, match=r"\[stt\] language must be a language code like \"en\""):
+        with pytest.raises(ValueError, match=r"\[stt\] language must be \"en\" for now"):
             load(p)
+
+
+def test_only_english_is_offered_for_now(tmp_path):
+    # English mode also covers Hinglish; Hindi mode gave garbage in these builds (2026-10-16), so it is refused.
+    p = tmp_path / "c.toml"
+    p.write_text('[stt]\nengine = "whisper-small"\nlanguage = "hi"\n')
+    with pytest.raises(ValueError, match=r"\[stt\] language must be \"en\" for now"):
+        load(p)
 
 
 def test_whisper_also_wakes_on_the_name_split_in_two():

@@ -40,7 +40,7 @@ browser_steps = false
 # Re-run ./install.sh after changing it: it downloads only the engine chosen here (Nemotron is
 # about 450 MB). Nemotron's weights are under the NVIDIA Open Model License.
 engine = "nemotron"
-# language = "en"  # the language Whisper listens for
+# language = "en"  # English only for now; it also writes Hinglish in Roman letters (Hindi mode gave garbage)
 
 [voice]
 # Only your voice wakes it, after `cd backend && uv run enroll.py` (needs engine = "parakeet" or a whisper engine). Lower this
