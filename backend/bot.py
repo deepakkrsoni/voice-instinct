@@ -15,7 +15,7 @@ from autonomy import browser_mcp, sandbox_settings, with_debug_record
 from budget import TimeBudget
 from claude_cli import ClaudeCodeBackend
 from clock import current_time
-from config import REPO_ROOT, load
+from config import REPO_ROOT, checks_voice, load
 from delegate import make_tools
 from gui import make_gui_router
 from guard import refuse_other_origins
@@ -61,8 +61,8 @@ def _quiet_logs():
 
 cfg = load()
 VOICEPRINT = Voiceprint.load(cfg)  # #32: no file means everyone is heard, as before enrolment
-if VOICEPRINT.enrolled and cfg.stt_engine != "parakeet":  # Nemotron streams, with no segment to check
-    logger.warning('voice check off: it needs [stt] engine = "parakeet"')
+if VOICEPRINT.enrolled and not checks_voice(cfg.stt_engine):  # Nemotron streams, with no segment to check
+    logger.warning('voice check off: it needs [stt] engine = "parakeet" or a whisper engine')
     VOICEPRINT = Voiceprint(None, None, cfg.voice_threshold)
 DATA = Path(cfg.data_dir).expanduser()
 registry = Registry(DATA / "harness.db")

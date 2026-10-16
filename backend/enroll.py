@@ -9,7 +9,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from config import load
+from config import checks_voice, load
 from enrolment import LINES
 
 WAIT_SECS = 20  # per line, before asking whether the mic is muted
@@ -34,8 +34,8 @@ def http_call(token):
 
 
 def run(cfg, call, say=print, sleep=time.sleep, delete=False) -> int:
-    if cfg.stt_engine != "parakeet":
-        say('The voice check needs [stt] engine = "parakeet" in config.toml.')
+    if not checks_voice(cfg.stt_engine):
+        say('The voice check needs [stt] engine = "parakeet" or a whisper engine in config.toml.')
         return 1
     if delete:
         r = call("POST", "/enrol/delete")

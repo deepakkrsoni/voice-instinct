@@ -19,6 +19,9 @@ from pipecat.services.stt_service import SegmentedSTTService, STTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 
+import whisper_text
+from config import checks_voice, is_whisper  # noqa: F401  (checks_voice: re-exported for callers and tests)
+
 PARAKEET_NAME = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
 
 
@@ -42,6 +45,18 @@ def _load_recognizer(model_dir: Path):
         tokens=str(model_dir / "tokens.txt"),
         num_threads=4,
         model_type="nemo_transducer",
+    )
+
+
+@functools.cache  # one copy for every session: reconnects must not load the model again
+def _load_whisper_recognizer(model_dir: Path, size: str, language: str):
+    import sherpa_onnx
+
+    return sherpa_onnx.OfflineRecognizer.from_whisper(
+        encoder=str(model_dir / f"{size}-encoder.int8.onnx"),
+        decoder=str(model_dir / f"{size}-decoder.int8.onnx"),
+        tokens=str(model_dir / f"{size}-tokens.txt"),
+        language=language, task="transcribe", num_threads=4,
     )
 
 
@@ -76,11 +91,11 @@ class ParakeetSTTService(SegmentedSTTService):
     wants_wav_segments = False
 
     def __init__(self, model_dir: Path | None = None, recognizer=None, voiceprint=None, enrolment=None,
-                 needs_check=None, **kwargs):
+                 needs_check=None, clean=None, model_name="parakeet-tdt-0.6b-v3", **kwargs):
         super().__init__(
             sample_rate=16000,
             ttfs_p99_latency=1.3,  # the 0.8 s pause plus decoding
-            settings=STTSettings(model="parakeet-tdt-0.6b-v3", language=Language.EN),
+            settings=STTSettings(model=model_name, language=Language.EN),
             **kwargs,
         )
         self._rec = recognizer or _load_recognizer(model_dir)
@@ -88,6 +103,7 @@ class ParakeetSTTService(SegmentedSTTService):
         self._voiceprint = voiceprint  # #32: only the owner's wake phrase wakes the assistant
         self._needs_check = needs_check  # text -> bool: asleep and a wake phrase (ProgrammaticWake.would_wake)
         self._enrolment = enrolment  # #32: while enrolling, segments are takes (enrolment.py)
+        self._clean = clean or (lambda text: text)  # str -> str on every decoded text (Whisper's filter)
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -159,7 +175,7 @@ class ParakeetSTTService(SegmentedSTTService):
         stream = self._rec.create_stream()
         stream.accept_waveform(16000, audio)
         self._rec.decode_stream(stream)
-        return stream.result.text.strip()
+        return self._clean(stream.result.text.strip())
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         if self._enrolment is not None and self._enrolment.active:  # #32: a take, not something said to the assistant
@@ -251,6 +267,9 @@ STT_MODELS = {
     "nemotron": "sherpa-onnx-nemotron-speech-streaming-en-0.6b-160ms-int8-2026-04-25",
     "nemotron-multilingual": "sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-160ms-int8-2026-06-11",
     "parakeet": PARAKEET_NAME,
+    "whisper-tiny": "sherpa-onnx-whisper-tiny",
+    "whisper-base": "sherpa-onnx-whisper-base",
+    "whisper-small": "sherpa-onnx-whisper-small",
 }
 
 
@@ -259,13 +278,18 @@ def stt_dir(cfg) -> Path:
 
 
 def make_stt(cfg, recognizer=None, voiceprint=None, enrolment=None, needs_check=None):
-    """The configured speech-to-text service. recognizer: a fake for tests. voiceprint: Parakeet only (#32)."""
+    """The configured speech-to-text service. recognizer: a fake for tests. voiceprint: segmented engines only (#32)."""
     d = stt_dir(cfg)
     if recognizer is None and not d.is_dir():
         raise RuntimeError(f"The {cfg.stt_engine} speech model is not installed ({d}). Run ./install.sh.")
     if cfg.stt_engine == "parakeet":
         return ParakeetSTTService(model_dir=d, recognizer=recognizer, voiceprint=voiceprint, enrolment=enrolment,
                                   needs_check=needs_check)
+    if is_whisper(cfg.stt_engine):
+        size = cfg.stt_engine.removeprefix("whisper-")
+        return ParakeetSTTService(model_dir=d, recognizer=recognizer or _load_whisper_recognizer(d, size, cfg.stt_language),
+                                  voiceprint=voiceprint, enrolment=enrolment, needs_check=needs_check,
+                                  clean=whisper_text.clean, model_name=cfg.stt_engine)
     return NemotronSTTService(model_dir=d, recognizer=recognizer,
                               language=Language.EN if cfg.stt_engine == "nemotron" else None)
 
