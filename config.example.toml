@@ -31,11 +31,13 @@ permission_timeout = 90
 browser_steps = false
 
 [stt]
-# Speech-to-text, all local: nemotron (English, streaming, default), nemotron-multilingual
+# Speech-to-text, all local: nemotron (English, streaming, the default), nemotron-multilingual
 # (40 languages, streaming), parakeet (the previous engine), or whisper-tiny / whisper-base /
-# whisper-small. Whisper heard far-away speech best in testing: whisper-base is about 120 ms per
-# phrase and a 198 MB download (tiny 111 MB, small 610 MB: slower, a little better).
-# Re-run ./install.sh after changing it: it downloads only the engine chosen here (nemotron
+# whisper-small. Pick a whisper engine if you sit far from the mic or the room is noisy: in testing
+# whisper-base heard far-away speech best (7 of 7 vs Parakeet's 2 of 7). It decodes a phrase after you
+# finish it, about 120 ms for base, so the reply starts a little later than with a streaming engine. Download: tiny 111 MB,
+# base 198 MB, small 610 MB (about 290 ms per phrase, no better than base in testing).
+# Re-run ./install.sh after changing it: it downloads only the engine chosen here (Nemotron is
 # about 450 MB). Nemotron's weights are under the NVIDIA Open Model License.
 engine = "nemotron"
 # language = "en"  # the language Whisper listens for
